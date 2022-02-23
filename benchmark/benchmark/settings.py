@@ -7,7 +7,7 @@ class SettingsError(Exception):
 
 class Settings:
     def __init__(self, testbed, key_name, key_path, consensus_port, mempool_port,
-                 front_port, repo_name, repo_url, branch, instance_type, aws_regions):
+                 front_port, repo_name, repo_url, branch, instance_type, aws_regions, validity_duration):
         if isinstance(aws_regions, list):
             regions = aws_regions
         else:
@@ -17,7 +17,7 @@ class Settings:
             testbed, key_name, key_path, repo_name, repo_url, branch, instance_type
         ]
         inputs_str += regions
-        inputs_int = [consensus_port, mempool_port, front_port]
+        inputs_int = [consensus_port, mempool_port, front_port, validity_duration]
         ok = all(isinstance(x, str) for x in inputs_str)
         ok &= all(isinstance(x, int) for x in inputs_int)
         ok &= len(regions) > 0
@@ -40,6 +40,8 @@ class Settings:
         self.instance_type = instance_type
         self.aws_regions = regions
 
+        self.validity_duration = validity_duration
+
     @classmethod
     def load(cls, filename):
         try:
@@ -58,6 +60,7 @@ class Settings:
                 data['repo']['branch'],
                 data['instances']['type'],
                 data['instances']['regions'],
+                data['validity']['duration'],
             )
         except (OSError, JSONDecodeError) as e:
             raise SettingsError(str(e))

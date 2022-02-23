@@ -95,6 +95,8 @@ class Bench:
     def _select_hosts(self, bench_parameters):
         nodes = max(bench_parameters.nodes)
 
+        ## NB: TODO use private IPs between nodes?
+
         # Ensure there are enough hosts.
         hosts = self.manager.hosts()
         if sum(len(x) for x in hosts.values()) < nodes:

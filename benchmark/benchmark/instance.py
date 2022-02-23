@@ -3,7 +3,7 @@ from botocore.exceptions import ClientError
 from collections import defaultdict, OrderedDict
 from time import sleep
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from benchmark.utils import Print, BenchError, progress_bar
 from benchmark.settings import Settings, SettingsError
 
@@ -22,11 +22,6 @@ class InstanceManager:
         self.settings = settings
         self.clients = OrderedDict()
         for region in settings.aws_regions:
-            # self.clients[region] = boto3.client('ec2', region_name=region)
-            ## TODO c.f. https://aws.amazon.com/premiumsupport/knowledge-center/iam-validate-access-credentials/
-            # print(f'https://sts.{region}.amazonaws.com')
-            # self.clients[region] = boto3.client('ec2', region_name=region, endpoint_url=f'https://sts.{region}.amazonaws.com')
-            # self.clients[region] = boto3.client('ec2') # => You must specify a region
             self.clients[region] = boto3.client('ec2', region_name=region)
 
     @classmethod
@@ -52,20 +47,20 @@ class InstanceManager:
                         'Values': state
                     },
                     ## NB: Only looking for spot instances
-                    {
-                        'Name': 'instance-lifecycle',
-                        'Values': ['spot']
-                    },
+                    # {
+                    #     'Name': 'instance-lifecycle',
+                    #     'Values': ['spot']
+                    # },
                 ]
             )
             instances = [y for x in r['Reservations'] for y in x['Instances']]
             for x in instances:
                 ids[region] += [x['InstanceId']]
                 ## NB: Using private IPs
-                if 'PrivateIpAddress' in x:
-                    ips[region] += [x['PrivateIpAddress']]
-                # if 'PublicIpAddress' in x:
-                #     ips[region] += [x['PublicIpAddress']]
+                # if 'PrivateIpAddress' in x:
+                #     ips[region] += [x['PrivateIpAddress']]
+                if 'PublicIpAddress' in x:
+                    ips[region] += [x['PublicIpAddress']]
         return ids, ips
 
     def _wait(self, state):
@@ -178,10 +173,10 @@ class InstanceManager:
             ## NB: Making sure the instances do not last too long
             start = datetime.now()
             duration = self.settings.validity_duration
-            end = start + datetime.timedelta(hours=duration)
-            
-            start = datetime.timestamp(start).strftime('%Y-%m-%dT%H:%M:%SZ')
-            end = datetime.timestamp(end).strftime('%Y-%m-%dT%H:%M:%SZ')
+            end = start + timedelta(hours=duration)
+
+            formatted = end.strftime('%d-%m-%Y %H:%M')
+            Print.info(f'Spot instances will be valid until {formatted}')
 
             ## NB: Using Spot instancs instead of normal instances
             for client in progress:
@@ -199,13 +194,14 @@ class InstanceManager:
                     }],
                     LaunchSpecification = {
                         'BlockDeviceMappings': [{
+                            'DeviceName': '/dev/sda1',
                             'Ebs': {
                                 'VolumeType': 'gp2',
                                 'VolumeSize': 200,
                                 'DeleteOnTermination': True
                             }
                         }],
-                        ## NB: Cost extra?
+                        ## NB: Cost extra? No authorization anyway
                         # 'EbsOptimized': True,
                         'ImageId': self._get_ami(client),
                         'InstanceType': self.settings.instance_type,
@@ -261,10 +257,12 @@ class InstanceManager:
             # Wait for all instances to properly shut down.
             Print.info('Waiting for all instances to shut down...')
             self._wait(['shutting-down'])
-            for client in self.clients.values():
-                client.delete_security_group(
-                    GroupName=self.settings.testbed
-                )
+            
+            ## NB: Didn't create additional security groups
+            # for client in self.clients.values():
+            #     client.delete_security_group(
+            #         GroupName=self.settings.testbed
+            #     )
 
             Print.heading(f'Testbed of {size} instances destroyed')
         except ClientError as e:
@@ -293,7 +291,7 @@ class InstanceManager:
             size = sum(len(x) for x in ids.values())
             Print.heading(f'Stopping {size} instances')
         except ClientError as e:
-            raise BenchError(AWSError(e))
+            raise BenchError('Failed to stop instances', AWSError(e))
 
     def hosts(self, flat=False):
         try:

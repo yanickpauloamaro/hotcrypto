@@ -60,6 +60,15 @@ def destroy(ctx):
 
 
 @task
+def cancel(ctx):
+    ''' Cancel all spot requests '''
+    try:
+        InstanceManager.make().cancel_spot_request()
+    except BenchError as e:
+        Print.error(e)
+
+
+@task
 def start(ctx, max=2):
     ''' Start at most `max` machines per data center '''
     try:

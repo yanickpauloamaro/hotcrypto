@@ -268,6 +268,28 @@ class InstanceManager:
         except ClientError as e:
             raise BenchError('Failed to terminate instances', AWSError(e))
 
+    ## NB: Cancel openned spot requests
+    def cancel_spot_request(self):
+        try:
+            for region, client in self.clients.items():
+                response = client.describe_spot_instance_requests(
+                    Filters=[
+                        {
+                            'Name': 'launch.key-name',
+                            'Values': [self.settings.key_name]
+                        },
+                    ]
+                )
+                
+                request_ids = [request['SpotInstanceRequestId'] for request in response['SpotInstanceRequests']]
+
+                response = client.cancel_spot_instance_requests(
+                    SpotInstanceRequestIds=request_ids
+                )
+
+                Print.info(f'Canceling the following spot requests in {region}: {request_ids}')
+        except ClientError as e:
+            raise BenchError('Failed to cancel spot requests', AWSError(e))
     def start_instances(self, max):
         size = 0
         try:

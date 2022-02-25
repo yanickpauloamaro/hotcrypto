@@ -6,7 +6,11 @@ from time import sleep
 from datetime import datetime, timedelta
 from benchmark.utils import Print, BenchError, progress_bar
 from benchmark.settings import Settings, SettingsError
+from typing import NamedTuple
 
+class InstanceIp(NamedTuple):
+    public: str
+    private: str
 
 class AWSError(Exception):
     def __init__(self, error):
@@ -31,10 +35,12 @@ class InstanceManager:
         except SettingsError as e:
             raise BenchError('Failed to load settings', e)
 
+    ## NB: Returns both public and private IPs
     def _get(self, state):
         # Possible states are: 'pending', 'running', 'shutting-down',
         # 'terminated', 'stopping', and 'stopped'.
         ids, ips = defaultdict(list), defaultdict(list)
+
         for region, client in self.clients.items():
             r = client.describe_instances(
                 Filters=[
@@ -59,15 +65,19 @@ class InstanceManager:
                 ]
             )
             instances = [y for x in r['Reservations'] for y in x['Instances']]
+
             for x in instances:
                 ids[region] += [x['InstanceId']]
-                ## NB: Using private IPs
-                # if 'PrivateIpAddress' in x:
-                #     ips[region] += [x['PrivateIpAddress']]
-                if 'PublicIpAddress' in x:
-                    ips[region] += [x['PublicIpAddress']]
+                ## NB: Using private IPs between nodes
+                if 'PublicIpAddress' in x and 'PrivateIpAddress' in x:
+                    public = x['PublicIpAddress']
+                    private = x['PrivateIpAddress']
+                    ips[region] += [InstanceIp(public, private)]
+                # if 'PublicIpAddress' in x:
+                #     ips[region] += [x['PublicIpAddress']]
+                    
         return ids, ips
-
+        
     def _wait(self, state):
         # Possible states are: 'pending', 'running', 'shutting-down',
         # 'terminated', 'stopping', and 'stopped'.
@@ -335,7 +345,7 @@ class InstanceManager:
             text += f'\n Region: {region.upper()}\n'
             for i, ip in enumerate(ips):
                 new_line = '\n' if (i+1) % 6 == 0 else ''
-                text += f'{new_line} {i}\tssh -i {key} ubuntu@{ip}\n'
+                text += f'{new_line} {i}\tssh -i {key} ubuntu@{ip.public}\n'
         print(
             '\n'
             '----------------------------------------------------------------\n'

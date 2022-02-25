@@ -38,19 +38,24 @@ class InstanceManager:
         for region, client in self.clients.items():
             r = client.describe_instances(
                 Filters=[
-                    {
-                        'Name': 'tag:Name',
-                        'Values': [self.settings.testbed]
-                    },
+                    # {
+                    #     'Name': 'tag:Name',
+                    #     'Values': [self.settings.testbed]
+                    # },
                     {
                         'Name': 'instance-state-name',
                         'Values': state
                     },
+                    ## NB: Find instances using key
+                    {
+                        'Name': 'key-name',
+                        'Values': [self.settings.key_name]
+                    },
                     ## NB: Only looking for spot instances
-                    # {
-                    #     'Name': 'instance-lifecycle',
-                    #     'Values': ['spot']
-                    # },
+                    {
+                        'Name': 'instance-lifecycle',
+                        'Values': ['spot']
+                    },
                 ]
             )
             instances = [y for x in r['Reservations'] for y in x['Instances']]

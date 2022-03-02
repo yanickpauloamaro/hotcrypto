@@ -25,6 +25,7 @@ class InstanceManager:
         assert isinstance(settings, Settings)
         self.settings = settings
         self.clients = OrderedDict()
+        Print.info(f'Regions: {settings.aws_regions}')
         for region in settings.aws_regions:
             self.clients[region] = boto3.client('ec2', region_name=region)
 
@@ -194,6 +195,7 @@ class InstanceManager:
             Print.info(f'Spot instances will be valid until {formatted}')
 
             ## NB: Using Spot instancs instead of normal instances
+            Print.info(f'Making a spot instance request')
             for client in progress:
                 response = client.request_spot_instances(
                     # DryRun = True,

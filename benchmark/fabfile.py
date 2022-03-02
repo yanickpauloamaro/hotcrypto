@@ -12,7 +12,7 @@ def local(ctx):
     ''' Run benchmarks on localhost '''
     bench_params = {
         'faults': 0,
-        'nodes': 4,
+        'nodes': 22,
         'rate': 1_000,
         'tx_size': 512,
         'duration': 20,
@@ -105,16 +105,17 @@ def remote(ctx):
     ''' Run benchmarks on AWS (N nodes across all regions) '''
     bench_params = {
         'faults': 0,
-        'tx_size': 512,
-        # 'nodes': [10, 20],
-        'rate': [10_000, 30_000],
+        # 'tx_size': 512,
+        'tx_size': 128,
+        # 'nodes': [4, 22],
+        'nodes': [22],
+        # 'rate': [1000, 10_000, 25_000],
+        # 'rate': [1000, 10_000],
+        'rate': [25_000],
         'duration': 300,
-        'runs': 5,
-        'nodes': [4],
-        # 'rate': [10_000],
-        # 'duration': 60,
-        # 'runs': 1,
+        'runs': 3,
     }
+
     node_params = {
         'consensus': {
             'timeout_delay': 5_000,
@@ -140,7 +141,7 @@ def plot(ctx):
     plot_params = {
         'faults': [0],
         # 'nodes': [10, 20, 50],
-        'nodes': [4],
+        'nodes': [4, 22],
         'tx_size': 512,
         'max_latency': [2_000, 5_000]
     }

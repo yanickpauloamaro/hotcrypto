@@ -3,9 +3,14 @@ from botocore.exceptions import ClientError
 from collections import defaultdict, OrderedDict
 from time import sleep
 
+from datetime import datetime, timedelta
 from benchmark.utils import Print, BenchError, progress_bar
 from benchmark.settings import Settings, SettingsError
+from typing import NamedTuple
 
+class InstanceIp(NamedTuple):
+    public: str
+    private: str
 
 class AWSError(Exception):
     def __init__(self, error):
@@ -20,6 +25,7 @@ class InstanceManager:
         assert isinstance(settings, Settings)
         self.settings = settings
         self.clients = OrderedDict()
+        Print.info(f'Regions: {settings.aws_regions}')
         for region in settings.aws_regions:
             self.clients[region] = boto3.client('ec2', region_name=region)
 
@@ -30,30 +36,40 @@ class InstanceManager:
         except SettingsError as e:
             raise BenchError('Failed to load settings', e)
 
+    # Returns both public and private IPs of the instances
     def _get(self, state):
         # Possible states are: 'pending', 'running', 'shutting-down',
         # 'terminated', 'stopping', and 'stopped'.
         ids, ips = defaultdict(list), defaultdict(list)
+
         for region, client in self.clients.items():
             r = client.describe_instances(
                 Filters=[
                     {
-                        'Name': 'tag:Name',
-                        'Values': [self.settings.testbed]
-                    },
-                    {
                         'Name': 'instance-state-name',
                         'Values': state
-                    }
+                    },
+                    {
+                        'Name': 'key-name',
+                        'Values': [self.settings.key_name]
+                    },
+                    {
+                        'Name': 'instance-lifecycle',
+                        'Values': ['spot']
+                    },
                 ]
             )
             instances = [y for x in r['Reservations'] for y in x['Instances']]
+
             for x in instances:
                 ids[region] += [x['InstanceId']]
-                if 'PublicIpAddress' in x:
-                    ips[region] += [x['PublicIpAddress']]
+                if 'PublicIpAddress' in x and 'PrivateIpAddress' in x:
+                    public = x['PublicIpAddress']
+                    private = x['PrivateIpAddress']
+                    ips[region] += [InstanceIp(public, private)]
+                    
         return ids, ips
-
+        
     def _wait(self, state):
         # Possible states are: 'pending', 'running', 'shutting-down',
         # 'terminated', 'stopping', and 'stopped'.
@@ -128,57 +144,74 @@ class InstanceManager:
         )
 
     def _get_ami(self, client):
-        # The AMI changes with regions.
-        response = client.describe_images(
-            Filters=[{
-                'Name': 'description',
-                'Values': ['Canonical, Ubuntu, 20.04 LTS, amd64 focal image build on 2020-10-26']
-            }]
-        )
-        return response['Images'][0]['ImageId']
+        ## NB: Using static AMI. Might need to change that if using multiple regions
+        return 'ami-0c6ebbd55ab05f070'
 
-    def create_instances(self, instances):
-        assert isinstance(instances, int) and instances > 0
+        # # The AMI changes with regions.
+        # response = client.describe_images(
+        #     Filters=[{
+        #         'Name': 'description',
+        #         'Values': ['Canonical, Ubuntu, 20.04 LTS, amd64 focal image build on 2020-10-26']
+        #     }]
+        # )
+        # return response['Images'][0]['ImageId']
 
-        # Create the security group in every region.
-        for client in self.clients.values():
-            try:
-                self._create_security_group(client)
-            except ClientError as e:
-                error = AWSError(e)
-                if error.code != 'InvalidGroup.Duplicate':
-                    raise BenchError('Failed to create security group', error)
+
+    def create_instances(self, nodes):
+        assert isinstance(nodes, int) and nodes > 0
+
+        ## NB: Default security group has all ports open already
+        # # Create the security group in every region.
+        # for client in self.clients.values():
+        #     try:
+        #         self._create_security_group(client)
+        #     except ClientError as e:
+        #         error = AWSError(e)
+        #         if error.code != 'InvalidGroup.Duplicate':
+        #             raise BenchError('Failed to create security group', error)
 
         try:
             # Create all instances.
-            size = instances * len(self.clients)
+            size = nodes * len(self.clients)
             progress = progress_bar(
-                self.clients.values(), prefix=f'Creating {size} instances'
+                self.clients.values(), prefix=f'Creating {size} instances ({nodes} nodes per region)'
             )
+
+            start = datetime.now()
+            duration = self.settings.validity_duration
+            end = start + timedelta(hours=duration)
+
+            formatted = end.strftime('%d-%m-%Y %H:%M')
+            Print.info(f'Spot instances will be valid until {formatted}')
+
+            Print.info(f'Making a spot instance request')
             for client in progress:
-                client.run_instances(
-                    ImageId=self._get_ami(client),
-                    InstanceType=self.settings.instance_type,
-                    KeyName=self.settings.key_name,
-                    MaxCount=instances,
-                    MinCount=instances,
-                    SecurityGroups=[self.settings.testbed],
+                response = client.request_spot_instances(
+                    # DryRun = True,
+                    # Type='one-time',
+                    InstanceCount = nodes,
+                    ValidUntil = end,
                     TagSpecifications=[{
-                        'ResourceType': 'instance',
+                        'ResourceType': 'spot-instances-request',
                         'Tags': [{
                             'Key': 'Name',
                             'Value': self.settings.testbed
                         }]
                     }],
-                    EbsOptimized=True,
-                    BlockDeviceMappings=[{
-                        'DeviceName': '/dev/sda1',
-                        'Ebs': {
-                            'VolumeType': 'gp2',
-                            'VolumeSize': 200,
-                            'DeleteOnTermination': True
-                        }
-                    }],
+                    LaunchSpecification = {
+                        'BlockDeviceMappings': [{
+                            'DeviceName': '/dev/sda1',
+                            'Ebs': {
+                                'VolumeType': 'gp2',
+                                'VolumeSize': 200,
+                                'DeleteOnTermination': True
+                            }
+                        }],
+                        # 'EbsOptimized': True,
+                        'ImageId': self._get_ami(client),
+                        'InstanceType': self.settings.instance_type,
+                        'KeyName': self.settings.key_name,
+                    },
                 )
 
             # Wait for the instances to boot.
@@ -204,14 +237,39 @@ class InstanceManager:
             # Wait for all instances to properly shut down.
             Print.info('Waiting for all instances to shut down...')
             self._wait(['shutting-down'])
-            for client in self.clients.values():
-                client.delete_security_group(
-                    GroupName=self.settings.testbed
-                )
+            
+            ## NB: No security group was created
+            # for client in self.clients.values():
+            #     client.delete_security_group(
+            #         GroupName=self.settings.testbed
+            #     )
 
             Print.heading(f'Testbed of {size} instances destroyed')
         except ClientError as e:
             raise BenchError('Failed to terminate instances', AWSError(e))
+
+    # Cancel openned spot requests
+    def cancel_spot_request(self):
+        try:
+            for region, client in self.clients.items():
+                response = client.describe_spot_instance_requests(
+                    Filters=[
+                        {
+                            'Name': 'launch.key-name',
+                            'Values': [self.settings.key_name]
+                        },
+                    ]
+                )
+                
+                request_ids = [request['SpotInstanceRequestId'] for request in response['SpotInstanceRequests']]
+
+                response = client.cancel_spot_instance_requests(
+                    SpotInstanceRequestIds=request_ids
+                )
+
+                Print.info(f'Canceling the following spot requests in {region}: {request_ids}')
+        except ClientError as e:
+            raise BenchError('Failed to cancel spot requests', AWSError(e))
 
     def start_instances(self, max):
         size = 0
@@ -236,7 +294,7 @@ class InstanceManager:
             size = sum(len(x) for x in ids.values())
             Print.heading(f'Stopping {size} instances')
         except ClientError as e:
-            raise BenchError(AWSError(e))
+            raise BenchError('Failed to stop instances', AWSError(e))
 
     def hosts(self, flat=False):
         try:
@@ -253,7 +311,7 @@ class InstanceManager:
             text += f'\n Region: {region.upper()}\n'
             for i, ip in enumerate(ips):
                 new_line = '\n' if (i+1) % 6 == 0 else ''
-                text += f'{new_line} {i}\tssh -i {key} ubuntu@{ip}\n'
+                text += f'{new_line} {i}\tssh -i {key} ubuntu@{ip.public}\n'
         print(
             '\n'
             '----------------------------------------------------------------\n'

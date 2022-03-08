@@ -73,7 +73,9 @@ class Bench:
         ]
         hosts = self.manager.hosts(flat=True)
         try:
-            g = Group(*hosts, user='ubuntu', connect_kwargs=self.connect)
+            ## Using public IP to connect to the instances
+            public_ips = [x.public for x in hosts]
+            g = Group(*public_ips, user='ubuntu', connect_kwargs=self.connect)
             g.run(' && '.join(cmd), hide=True)
             Print.heading(f'Initialized testbed of {len(hosts)} nodes')
         except (GroupException, ExecutionError) as e:
@@ -87,7 +89,9 @@ class Bench:
         delete_logs = CommandMaker.clean_logs() if delete_logs else 'true'
         cmd = [delete_logs, f'({CommandMaker.kill()} || true)']
         try:
-            g = Group(*hosts, user='ubuntu', connect_kwargs=self.connect)
+            # Using public IP to connect to the instances
+            public_ips = [x.public for x in hosts]
+            g = Group(*public_ips, user='ubuntu', connect_kwargs=self.connect)
             g.run(' && '.join(cmd), hide=True)
         except GroupException as e:
             raise BenchError('Failed to kill nodes', FabricError(e))
@@ -108,7 +112,7 @@ class Bench:
     def _background_run(self, host, command, log_file):
         name = splitext(basename(log_file))[0]
         cmd = f'tmux new -d -s "{name}" "{command} |& tee {log_file}"'
-        c = Connection(host, user='ubuntu', connect_kwargs=self.connect)
+        c = Connection(host.public, user='ubuntu', connect_kwargs=self.connect)
         output = c.run(cmd, hide=True)
         self._check_stderr(output)
 
@@ -126,7 +130,9 @@ class Bench:
                 f'./{self.settings.repo_name}/target/release/'
             )
         ]
-        g = Group(*hosts, user='ubuntu', connect_kwargs=self.connect)
+        # Using public IP to connect to the instances
+        public_ips = [x.public for x in hosts]
+        g = Group(*public_ips, user='ubuntu', connect_kwargs=self.connect)
         g.run(' && '.join(cmd), hide=True)
 
     def _config(self, hosts, node_parameters):
@@ -153,9 +159,10 @@ class Bench:
             keys += [Key.from_file(filename)]
 
         names = [x.name for x in keys]
-        consensus_addr = [f'{x}:{self.settings.consensus_port}' for x in hosts]
-        front_addr = [f'{x}:{self.settings.front_port}' for x in hosts]
-        mempool_addr = [f'{x}:{self.settings.mempool_port}' for x in hosts]
+        # Using private IP to communicate between nodes
+        consensus_addr = [f'{x.private}:{self.settings.consensus_port}' for x in hosts]
+        front_addr = [f'{x.private}:{self.settings.front_port}' for x in hosts]
+        mempool_addr = [f'{x.private}:{self.settings.mempool_port}' for x in hosts]
         committee = Committee(names, consensus_addr, front_addr, mempool_addr)
         committee.print(PathMaker.committee_file())
 
@@ -163,13 +170,16 @@ class Bench:
 
         # Cleanup all nodes.
         cmd = f'{CommandMaker.cleanup()} || true'
-        g = Group(*hosts, user='ubuntu', connect_kwargs=self.connect)
+
+        # Using public IP to connect to the instances
+        public_ips = [x.public for x in hosts]
+        g = Group(*public_ips, user='ubuntu', connect_kwargs=self.connect)
         g.run(cmd, hide=True)
 
         # Upload configuration files.
         progress = progress_bar(hosts, prefix='Uploading config files:')
         for i, host in enumerate(progress):
-            c = Connection(host, user='ubuntu', connect_kwargs=self.connect)
+            c = Connection(host.public, user='ubuntu', connect_kwargs=self.connect)
             c.put(PathMaker.committee_file(), '.')
             c.put(PathMaker.key_file(i), '.')
             c.put(PathMaker.parameters_file(), '.')
@@ -186,10 +196,11 @@ class Bench:
         # Filter all faulty nodes from the client addresses (or they will wait
         # for the faulty nodes to be online).
         committee = Committee.load(PathMaker.committee_file())
-        addresses = [f'{x}:{self.settings.front_port}' for x in hosts]
+        addresses = [f'{x.public}:{self.settings.front_port}' for x in hosts]
         rate_share = ceil(rate / committee.size())  # Take faults into account.
         timeout = node_parameters.timeout_delay
         client_logs = [PathMaker.client_log_file(i) for i in range(len(hosts))]
+
         for host, addr, log_file in zip(hosts, addresses, client_logs):
             cmd = CommandMaker.run_client(
                 addr,
@@ -232,7 +243,7 @@ class Bench:
         # Download log files.
         progress = progress_bar(hosts, prefix='Downloading logs:')
         for i, host in enumerate(progress):
-            c = Connection(host, user='ubuntu', connect_kwargs=self.connect)
+            c = Connection(host.public, user='ubuntu', connect_kwargs=self.connect)
             c.get(PathMaker.node_log_file(i), local=PathMaker.node_log_file(i))
             c.get(
                 PathMaker.client_log_file(i), local=PathMaker.client_log_file(i)

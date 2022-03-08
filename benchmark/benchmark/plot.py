@@ -102,34 +102,34 @@ class Ploter:
         return f'Max latency: {float(x) / 1000:,.1f} s {faults}'
 
     @classmethod
-    def plot_robustness(cls, files):
+    def plot_robustness(cls, files, tx_size='?'):
         assert isinstance(files, list)
         assert all(isinstance(x, str) for x in files)
         z_axis = cls.nodes
         x_label = 'Input rate (tx/s)'
         y_label = ['Throughput (tx/s)', 'Throughput (MB/s)']
         ploter = cls(files)
-        ploter._plot(x_label, y_label, ploter._tps, z_axis, 'robustness')
+        ploter._plot(x_label, y_label, ploter._tps, z_axis, f'robustness ({tx_size} Bytes)')
 
     @classmethod
-    def plot_latency(cls, files):
+    def plot_latency(cls, files, tx_size='?'):
         assert isinstance(files, list)
         assert all(isinstance(x, str) for x in files)
         z_axis = cls.nodes
         x_label = 'Throughput (tx/s)'
         y_label = ['Latency (ms)']
         ploter = cls(files)
-        ploter._plot(x_label, y_label, ploter._latency, z_axis, 'latency')
+        ploter._plot(x_label, y_label, ploter._latency, z_axis, f'latency ({tx_size} Bytes)')
 
     @classmethod
-    def plot_tps(cls, files):
+    def plot_tps(cls, files, tx_size='?'):
         assert isinstance(files, list)
         assert all(isinstance(x, str) for x in files)
         z_axis = cls.max_latency
         x_label = 'Committee size'
         y_label = ['Throughput (tx/s)', 'Throughput (MB/s)']
         ploter = cls(files)
-        ploter._plot(x_label, y_label, ploter._tps, z_axis, 'tps')
+        ploter._plot(x_label, y_label, ploter._tps, z_axis, f'tps ({tx_size} Bytes)')
 
     @classmethod
     def plot(cls, params_dict):
@@ -159,6 +159,6 @@ class Ploter:
                 )
 
         # Make the plots.
-        cls.plot_robustness(robustness_files)
-        cls.plot_latency(latency_files)
-        cls.plot_tps(tps_files)
+        cls.plot_robustness(robustness_files, tx_size)
+        cls.plot_latency(latency_files, tx_size)
+        cls.plot_tps(tps_files, tx_size)

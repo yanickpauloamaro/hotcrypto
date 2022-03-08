@@ -80,6 +80,7 @@ class LocalBench:
             rate_share = ceil(rate / nodes)
             timeout = self.node_parameters.timeout_delay
             client_logs = [PathMaker.client_log_file(i) for i in range(nodes)]
+
             for addr, log_file in zip(addresses, client_logs):
                 cmd = CommandMaker.run_client(
                     addr,
@@ -101,6 +102,7 @@ class LocalBench:
                     debug=debug
                 )
                 self._background_run(cmd, log_file)
+                count = count + 1
 
             # Wait for the nodes to synchronize
             Print.info('Waiting for the nodes to synchronize...')

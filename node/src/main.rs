@@ -1,5 +1,6 @@
 mod config;
 mod node;
+mod currency;
 
 use crate::config::Export as _;
 use crate::config::{Committee, Secret};
@@ -30,7 +31,8 @@ async fn main() {
                 .args_from_usage("--keys=<FILE> 'The file containing the node keys'")
                 .args_from_usage("--committee=<FILE> 'The file containing committee information'")
                 .args_from_usage("--parameters=[FILE] 'The file containing the node parameters'")
-                .args_from_usage("--store=<PATH> 'The path where to create the data store'"),
+                .args_from_usage("--store=<PATH> 'The path where to create the data store'")
+                .args_from_usage("--port=<PORT> 'The port from which nodes will listen for requests'"),
         )
         .subcommand(
             SubCommand::with_name("deploy")
@@ -64,7 +66,9 @@ async fn main() {
             let committee_file = subm.value_of("committee").unwrap();
             let parameters_file = subm.value_of("parameters");
             let store_path = subm.value_of("store").unwrap();
-            match Node::new(committee_file, key_file, store_path, parameters_file).await {
+
+            let port = subm.value_of("port").unwrap();
+            match Node::new(committee_file, key_file, store_path, parameters_file, port).await {
                 Ok(mut node) => {
                     tokio::spawn(async move {
                         node.analyze_block().await;
@@ -140,8 +144,10 @@ fn deploy_testbed(nodes: usize) -> Result<Vec<JoinHandle<()>>, Box<dyn std::erro
             let store_path = format!("db_{}", i);
             let _ = fs::remove_dir_all(&store_path);
 
+            let port = format!("{}", 25_300 + i);
+
             Ok(tokio::spawn(async move {
-                match Node::new(committee_file, &key_file, &store_path, None).await {
+                match Node::new(committee_file, &key_file, &store_path, None, &port).await {
                     Ok(mut node) => {
                         // Sink the commit channel.
                         while node.commit.recv().await.is_some() {}

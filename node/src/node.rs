@@ -132,7 +132,7 @@ impl Node {
                     // ##TODO: Should have signature to show that the client owns the account
                     let account: Digest;
                     let balance = accounts.get(&account).unwrap_or(&CONST_INITIAL_BALANCE).clone();
-    
+
                     tx_response.send(balance);
                 },
                 Some(block) = self.commit.recv() => {

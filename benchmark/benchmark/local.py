@@ -81,24 +81,7 @@ class LocalBench:
             timeout = self.node_parameters.timeout_delay
             client_logs = [PathMaker.client_log_file(i) for i in range(nodes)]
 
-            ## NB: Limitting the number of clients just so that they are not a bottleneck
-            clients_cap = nodes
-            actual_rate = rate
-            actual_clients = nodes
-            # Print.info(f'Original rate {rate}')
-            # if clients_cap < nodes:
-            #     actual_clients = clients_cap
-                # actual_rate = rate - (nodes - clients_cap)
-
-            rate_share = ceil(actual_rate / actual_clients)
-            count = 1
             for addr, log_file in zip(addresses, client_logs):
-                # if count <= clients_cap:
-                #     Print.info(f'Running client n° {count} with rate {rate_share}')
-                # else:
-                #     rate_share = 0
-                #     Print.info(f'Running client n° {count} with rate {rate_share}')
-
                 cmd = CommandMaker.run_client(
                     addr,
                     self.tx_size,
@@ -106,14 +89,11 @@ class LocalBench:
                     timeout
                 )
                 self._background_run(cmd, log_file)
-                count = count + 1
 
             # Run the nodes.
             dbs = [PathMaker.db_path(i) for i in range(nodes)]
             node_logs = [PathMaker.node_log_file(i) for i in range(nodes)]
-            count = 1
             for key_file, db, log_file in zip(key_files, dbs, node_logs):
-                # Print.info(f'Running node number {count}')
                 cmd = CommandMaker.run_node(
                     key_file,
                     PathMaker.committee_file(),

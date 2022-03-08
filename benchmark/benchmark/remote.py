@@ -73,11 +73,9 @@ class Bench:
         ]
         hosts = self.manager.hosts(flat=True)
         try:
-            ## NB: Using public IP to connect to the instances
+            ## Using public IP to connect to the instances
             public_ips = [x.public for x in hosts]
             g = Group(*public_ips, user='ubuntu', connect_kwargs=self.connect)
-            
-            # g = Group(*hosts, user='ubuntu', connect_kwargs=self.connect)
             g.run(' && '.join(cmd), hide=True)
             Print.heading(f'Initialized testbed of {len(hosts)} nodes')
         except (GroupException, ExecutionError) as e:
@@ -91,11 +89,9 @@ class Bench:
         delete_logs = CommandMaker.clean_logs() if delete_logs else 'true'
         cmd = [delete_logs, f'({CommandMaker.kill()} || true)']
         try:
-            ## NB: Using public IP to connect to the instances
+            # Using public IP to connect to the instances
             public_ips = [x.public for x in hosts]
             g = Group(*public_ips, user='ubuntu', connect_kwargs=self.connect)
-            
-            # g = Group(*hosts, user='ubuntu', connect_kwargs=self.connect)
             g.run(' && '.join(cmd), hide=True)
         except GroupException as e:
             raise BenchError('Failed to kill nodes', FabricError(e))
@@ -134,11 +130,9 @@ class Bench:
                 f'./{self.settings.repo_name}/target/release/'
             )
         ]
-        ## NB: Using public IP to connect to the instances
+        # Using public IP to connect to the instances
         public_ips = [x.public for x in hosts]
         g = Group(*public_ips, user='ubuntu', connect_kwargs=self.connect)
-
-        # g = Group(*hosts, user='ubuntu', connect_kwargs=self.connect)
         g.run(' && '.join(cmd), hide=True)
 
     def _config(self, hosts, node_parameters):
@@ -165,7 +159,7 @@ class Bench:
             keys += [Key.from_file(filename)]
 
         names = [x.name for x in keys]
-        ## NB: Using private IP to communicate between nodes
+        # Using private IP to communicate between nodes
         consensus_addr = [f'{x.private}:{self.settings.consensus_port}' for x in hosts]
         front_addr = [f'{x.private}:{self.settings.front_port}' for x in hosts]
         mempool_addr = [f'{x.private}:{self.settings.mempool_port}' for x in hosts]
@@ -177,11 +171,9 @@ class Bench:
         # Cleanup all nodes.
         cmd = f'{CommandMaker.cleanup()} || true'
 
-        ## NB: Using public IP to connect to the instances
+        # Using public IP to connect to the instances
         public_ips = [x.public for x in hosts]
         g = Group(*public_ips, user='ubuntu', connect_kwargs=self.connect)
-        
-        # g = Group(*hosts, user='ubuntu', connect_kwargs=self.connect)
         g.run(cmd, hide=True)
 
         # Upload configuration files.
@@ -209,23 +201,7 @@ class Bench:
         timeout = node_parameters.timeout_delay
         client_logs = [PathMaker.client_log_file(i) for i in range(len(hosts))]
 
-        ## NB: Limitting the number of clients just so that they are not a bottleneck
-        clients_cap = 4
-        actual_rate = rate
-        actual_clients = committee.size()
-        # if clients_cap < committee.size():
-        #     actual_clients = clients_cap
-        #     actual_rate = rate - (committee.size() - clients_cap)
-        rate_share = ceil(actual_rate / actual_clients)
-        count = 1
-
         for host, addr, log_file in zip(hosts, addresses, client_logs):
-            # if count <= clients_cap:
-            #     Print.info(f'Running client n° {count} with rate {rate_share}')
-            # else:
-            #     rate_share = 0
-            #     Print.info(f'Running client n° {count} with rate {rate_share}')
-
             cmd = CommandMaker.run_client(
                 addr,
                 bench_parameters.tx_size,
@@ -234,15 +210,12 @@ class Bench:
                 nodes=addresses
             )
             self._background_run(host, cmd, log_file)
-            count = count + 1
 
         # Run the nodes.
         key_files = [PathMaker.key_file(i) for i in range(len(hosts))]
         dbs = [PathMaker.db_path(i) for i in range(len(hosts))]
         node_logs = [PathMaker.node_log_file(i) for i in range(len(hosts))]
-        count = 1
         for host, key_file, db, log_file in zip(hosts, key_files, dbs, node_logs):
-            # Print.info(f'Running node number {count}')
             cmd = CommandMaker.run_node(
                 key_file,
                 PathMaker.committee_file(),
@@ -251,7 +224,6 @@ class Bench:
                 debug=debug
             )
             self._background_run(host, cmd, log_file)
-            count = count + 1
 
         # Wait for the nodes to synchronize
         Print.info('Waiting for the nodes to synchronize...')

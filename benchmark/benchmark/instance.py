@@ -36,7 +36,7 @@ class InstanceManager:
         except SettingsError as e:
             raise BenchError('Failed to load settings', e)
 
-    ## NB: Returns both public and private IPs
+    # Returns both public and private IPs of the instances
     def _get(self, state):
         # Possible states are: 'pending', 'running', 'shutting-down',
         # 'terminated', 'stopping', and 'stopped'.
@@ -45,20 +45,14 @@ class InstanceManager:
         for region, client in self.clients.items():
             r = client.describe_instances(
                 Filters=[
-                    # {
-                    #     'Name': 'tag:Name',
-                    #     'Values': [self.settings.testbed]
-                    # },
                     {
                         'Name': 'instance-state-name',
                         'Values': state
                     },
-                    ## NB: Find instances using key
                     {
                         'Name': 'key-name',
                         'Values': [self.settings.key_name]
                     },
-                    ## NB: Only looking for spot instances
                     {
                         'Name': 'instance-lifecycle',
                         'Values': ['spot']
@@ -69,13 +63,10 @@ class InstanceManager:
 
             for x in instances:
                 ids[region] += [x['InstanceId']]
-                ## NB: Using private IPs between nodes
                 if 'PublicIpAddress' in x and 'PrivateIpAddress' in x:
                     public = x['PublicIpAddress']
                     private = x['PrivateIpAddress']
                     ips[region] += [InstanceIp(public, private)]
-                # if 'PublicIpAddress' in x:
-                #     ips[region] += [x['PublicIpAddress']]
                     
         return ids, ips
         
@@ -186,7 +177,6 @@ class InstanceManager:
                 self.clients.values(), prefix=f'Creating {size} instances ({nodes} nodes per region)'
             )
 
-            ## NB: Making sure the instances do not last too long
             start = datetime.now()
             duration = self.settings.validity_duration
             end = start + timedelta(hours=duration)
@@ -194,7 +184,6 @@ class InstanceManager:
             formatted = end.strftime('%d-%m-%Y %H:%M')
             Print.info(f'Spot instances will be valid until {formatted}')
 
-            ## NB: Using Spot instancs instead of normal instances
             Print.info(f'Making a spot instance request')
             for client in progress:
                 response = client.request_spot_instances(
@@ -218,38 +207,12 @@ class InstanceManager:
                                 'DeleteOnTermination': True
                             }
                         }],
-                        ## NB: Cost extra? No authorization anyway
                         # 'EbsOptimized': True,
                         'ImageId': self._get_ami(client),
                         'InstanceType': self.settings.instance_type,
                         'KeyName': self.settings.key_name,
                     },
                 )
-
-                # client.run_instances(
-                #     ImageId=self._get_ami(client),
-                #     InstanceType=self.settings.instance_type,
-                #     KeyName=self.settings.key_name,
-                #     MaxCount=nodes,
-                #     MinCount=nodes,
-                #     SecurityGroups=[self.settings.testbed],
-                #     TagSpecifications=[{
-                #         'ResourceType': 'instance',
-                #         'Tags': [{
-                #             'Key': 'Name',
-                #             'Value': self.settings.testbed
-                #         }]
-                #     }],
-                #     EbsOptimized=True,
-                #     BlockDeviceMappings=[{
-                #         'DeviceName': '/dev/sda1',
-                #         'Ebs': {
-                #             'VolumeType': 'gp2',
-                #             'VolumeSize': 200,
-                #             'DeleteOnTermination': True
-                #         }
-                #     }],
-                # )
 
             # Wait for the instances to boot.
             Print.info('Waiting for all instances to boot...')
@@ -275,7 +238,7 @@ class InstanceManager:
             Print.info('Waiting for all instances to shut down...')
             self._wait(['shutting-down'])
             
-            ## NB: Didn't create additional security groups
+            ## NB: No security group was created
             # for client in self.clients.values():
             #     client.delete_security_group(
             #         GroupName=self.settings.testbed
@@ -285,7 +248,7 @@ class InstanceManager:
         except ClientError as e:
             raise BenchError('Failed to terminate instances', AWSError(e))
 
-    ## NB: Cancel openned spot requests
+    # Cancel openned spot requests
     def cancel_spot_request(self):
         try:
             for region, client in self.clients.items():
@@ -307,6 +270,7 @@ class InstanceManager:
                 Print.info(f'Canceling the following spot requests in {region}: {request_ids}')
         except ClientError as e:
             raise BenchError('Failed to cancel spot requests', AWSError(e))
+
     def start_instances(self, max):
         size = 0
         try:

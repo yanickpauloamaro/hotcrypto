@@ -1,24 +1,21 @@
 use crate::config::Export as _;
 use crate::config::{Committee, ConfigError, Parameters, Secret};
-use crate::currency::{Account, Request, Currency, SignedTransaction, CONST_INITIAL_BALANCE};
+use crate::currency::{Account, SignedRequest, Currency, SignedTransaction, CONST_INITIAL_BALANCE};
 
 use consensus::{Block, Consensus};
 use crypto::{SignatureService, Digest};
-use log::{info, debug, warn};
+use log::{info, warn};
 use mempool::Mempool;
 use store::Store;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
-use tokio::net::{TcpListener, TcpStream};
 use network::{MessageHandler, Receiver as NetworkReceiver, Writer};
 use async_trait::async_trait;
 use bytes::Bytes;
 use std::error::Error;
-use std::net::SocketAddr;
 use std::collections::HashMap;
 use tokio::time::{sleep, Duration};
 use tokio::sync::oneshot;
-use std::fmt;
 use futures::sink::SinkExt as _;
 use crypto::{Signature, PublicKey, Hash as Digestable};
 
@@ -27,7 +24,7 @@ pub const CHANNEL_CAPACITY: usize = 1_000;
 
 pub struct Node {
     pub commit: Receiver<Block>,
-    pub request: Receiver<(Request, oneshot::Sender<Currency>)>,
+    pub request: Receiver<(SignedRequest, oneshot::Sender<Currency>)>,
     pub store: Store
 }
 
@@ -134,8 +131,8 @@ impl Node {
     }
 
     fn transfer(source: Account, dest: Account, amount: Currency, accounts: &mut HashMap<Account, Currency>) {
-        let source_balance = Node::get_balance(&source, &mut accounts);
-        let dest_balance = Node::get_balance(&dest, &mut accounts);
+        let source_balance = Node::get_balance(&source, accounts);
+        let dest_balance = Node::get_balance(&dest, accounts);
 
         if source_balance >= amount {
             accounts.insert(source, source_balance - amount);
@@ -150,18 +147,23 @@ impl Node {
         loop {
             tokio::select! {
                 Some((request, tx_response)) = self.request.recv() => {
-                    // ##TODO: Should have signature to show that the client owns the account
-                    // i.e. Request has a signature too
-                    let account: Account;
-                    let balance = Node::get_balance(&account, &mut accounts);
+                    // Verify request signature and send response
+                    let SignedRequest{request, signature} = request;
 
-                    tx_response.send(balance);
+                    if Node::verify_signature(&request, &request.source, &signature) {
+                        // There is only one type of request for now
+                        let balance = Node::get_balance(&request.source, &mut accounts);
+                        let _err = tx_response.send(balance);
+                    }
                 },
                 Some(block) = self.commit.recv() => {
-                    // verify transactions and update accounts
+                    // Verify transaction signatures and update accounts
                     for x in &block.payload {
+                        // Retreive transaction from storage
                         let option = self.fetch(x).await;
                         if option.is_none() {
+                            // Skip transactions that weren't stored
+                            // ##TODO Can this lead to problems?
                             continue;
                         }
                         
@@ -181,7 +183,7 @@ impl Node {
 /// Defines how the network receiver handles incoming transactions.
 #[derive(Clone)]
 struct RequestReceiverHandler {
-    tx_request: Sender<(Request, oneshot::Sender<Currency>)>
+    tx_request: Sender<(SignedRequest, oneshot::Sender<Currency>)>
 }
 
 #[async_trait]
@@ -194,17 +196,20 @@ impl MessageHandler for RequestReceiverHandler {
             .expect("Failed to deserialize a request");
 
         // Send the request to the node.
-        self.tx_request
-            .send((request, tx_response))
-            .await;
+        if let Err(e) = self.tx_request.send((request, tx_response)).await {
+            panic!("Failed to send request to node: {:?}", e);
+        }
 
         let response: Currency = rx_response
             .await
-            .expect("Failed to receive response from Node");
+            .expect("Failed to receive response from node");
+        
+        let serialized = bincode::serialize(&response)
+            .expect("Failed to serialize response");
 
-        // ##TODO Send response back to client
-        let _ = writer.send(Bytes::from(response)).await;
-        // Give the change to schedule other tasks.
+        let _ = writer.send(Bytes::from(serialized)).await;
+
+        // Give the chance to schedule other tasks.
         tokio::task::yield_now().await;
         Ok(())
     }

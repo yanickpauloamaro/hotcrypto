@@ -1,16 +1,49 @@
 use crypto::{PublicKey, Signature, Hash as Digestable, Digest};
 use ed25519_dalek::Sha512;
 use serde::{Deserialize, Serialize};
-use tokio::sync::mpsc::Sender;
 use bytes::Bytes;
-use std::hash::{Hash, Hasher};
-use std::collections::hash_map::DefaultHasher;
+use std::hash::Hash;
 use ed25519_dalek::Digest as _;
 use std::convert::TryInto;
 
-#[derive(Serialize, Deserialize)]
-pub enum Request {
+#[derive(Serialize, Deserialize, Hash, Debug)]
+pub enum RequestType {
     Balance
+}
+
+impl RequestType {
+    fn ordinal(&self) -> u8 {
+        return match self {
+            RequestType::Balance => 0u8
+        }
+    }
+
+    fn to_bytes(&self) -> [u8; 1] {
+        return self.ordinal().to_le_bytes();
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Request {
+    pub source: Account,
+    pub tpe: RequestType,
+    pub nonce: u64
+}
+
+impl Digestable for Request {
+    fn digest(&self) -> Digest {
+        let mut hasher = Sha512::new();
+        hasher.update(self.source);
+        hasher.update(self.tpe.to_bytes());
+        hasher.update(self.nonce.to_le_bytes());
+        Digest(hasher.finalize().as_slice()[..32].try_into().unwrap())
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct SignedRequest {
+    pub request: Request,
+    pub signature: Signature
 }
 
 pub type Currency = u64;

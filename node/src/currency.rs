@@ -1,7 +1,12 @@
-use crypto::{PublicKey, Signature};
+use crypto::{PublicKey, Signature, Hash as Digestable, Digest};
+use ed25519_dalek::Sha512;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::Sender;
 use bytes::Bytes;
+use std::hash::{Hash, Hasher};
+use std::collections::hash_map::DefaultHasher;
+use ed25519_dalek::Digest as _;
+use std::convert::TryInto;
 
 #[derive(Serialize, Deserialize)]
 pub enum Request {
@@ -21,23 +26,33 @@ Une transaction doit contenir à minima:
   - une signature (48 bytes)
 donc 120 bytes
 */
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Hash)]
 pub struct Transaction {
-    source: Account,    // 32B
-    dest: Account,      // 32B
-    amount: Currency,   // 8B
-    nonce: u64          // 8B
+    pub source: Account,    // 32B
+    pub dest: Account,      // 32B
+    pub amount: Currency,   // 8B
+    pub nonce: u64          // 8B
+}
+
+impl Digestable for Transaction {
+    fn digest(&self) -> Digest {
+        let mut hasher = Sha512::new();
+        hasher.update(self.source);
+        hasher.update(self.dest);
+        hasher.update(self.amount.to_le_bytes());
+        hasher.update(self.nonce.to_le_bytes());
+        Digest(hasher.finalize().as_slice()[..32].try_into().unwrap())
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SignedTransaction {
-    content: Transaction,
-    signature: Signature
+    pub content: Transaction,
+    pub signature: Signature    // signed hash of transaction
 }
 
 impl From<SignedTransaction> for Bytes {
     fn from(tx: SignedTransaction) -> Bytes {
-        
         // ##TODO: does this guarantee a consistent size?
         let serialized = bincode::serialize(&tx)
             .expect("Failed to serialize a transaction");
@@ -47,11 +62,11 @@ impl From<SignedTransaction> for Bytes {
 }
 
 impl SignedTransaction {
-    pub fn from(bytes: Bytes) -> Transaction {
+    pub fn from(bytes: Bytes) -> SignedTransaction {
         
         let tx = bincode::deserialize(&bytes)
             .expect("Failed to deserialize a transaction");
         
-        return tx
+        return tx;
     }
 }

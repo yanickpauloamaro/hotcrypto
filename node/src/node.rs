@@ -1,6 +1,6 @@
 use crate::config::Export as _;
 use crate::config::{Committee, ConfigError, Parameters, Secret};
-use crate::currency::{Request, Currency, SignedTransaction, CONST_INITIAL_BALANCE};
+use crate::currency::{Account, Request, Currency, SignedTransaction, CONST_INITIAL_BALANCE};
 
 use consensus::{Block, Consensus};
 use crypto::{SignatureService, Digest};
@@ -20,6 +20,7 @@ use tokio::time::{sleep, Duration};
 use tokio::sync::oneshot;
 use std::fmt;
 use futures::sink::SinkExt as _;
+use crypto::{Signature, PublicKey, Hash as Digestable};
 
 /// The default channel capacity for this module.
 pub const CHANNEL_CAPACITY: usize = 1_000;
@@ -122,16 +123,37 @@ impl Node {
         }
     }
 
+    fn get_balance(account: &Account, accounts: &mut HashMap<Account, Currency>) -> Currency {
+        return accounts.get(&account).unwrap_or(&CONST_INITIAL_BALANCE).clone();
+    }
+
+    fn verify_signature<D>(msg: &D, key: &PublicKey, signature: &Signature) -> bool 
+        where D: Digestable
+    {
+        return signature.verify(&msg.digest(), key).is_ok();
+    }
+
+    fn transfer(source: Account, dest: Account, amount: Currency, accounts: &mut HashMap<Account, Currency>) {
+        let source_balance = Node::get_balance(&source, &mut accounts);
+        let dest_balance = Node::get_balance(&dest, &mut accounts);
+
+        if source_balance >= amount {
+            accounts.insert(source, source_balance - amount);
+            accounts.insert(dest, dest_balance - amount);
+        }
+    }
+
     pub async fn analyze_block(&mut self) {
 
-        let accounts: HashMap<Digest, Currency> = HashMap::new();
+        let mut accounts: HashMap<Account, Currency> = HashMap::new();
 
         loop {
             tokio::select! {
                 Some((request, tx_response)) = self.request.recv() => {
                     // ##TODO: Should have signature to show that the client owns the account
-                    let account: Digest;
-                    let balance = accounts.get(&account).unwrap_or(&CONST_INITIAL_BALANCE).clone();
+                    // i.e. Request has a signature too
+                    let account: Account;
+                    let balance = Node::get_balance(&account, &mut accounts);
 
                     tx_response.send(balance);
                 },
@@ -142,11 +164,13 @@ impl Node {
                         if option.is_none() {
                             continue;
                         }
-
+                        
                         let bytes = Bytes::from(option.unwrap());
-                        let transaction = SignedTransaction::from(bytes);
+                        let SignedTransaction{content: tx, signature} = SignedTransaction::from(bytes);
 
-                        // ##TODO: verify signature
+                        if Node::verify_signature(&tx, &tx.source, &signature){
+                            Node::transfer(tx.source, tx.dest, tx.amount, &mut accounts);
+                        }
                     }
                 }
             }
@@ -174,11 +198,12 @@ impl MessageHandler for RequestReceiverHandler {
             .send((request, tx_response))
             .await;
 
-        let response = rx_response.await;
+        let response: Currency = rx_response
+            .await
+            .expect("Failed to receive response from Node");
 
         // ##TODO Send response back to client
-        let _ = writer.send(Bytes::from("Ack")).await;
-
+        let _ = writer.send(Bytes::from(response)).await;
         // Give the change to schedule other tasks.
         tokio::task::yield_now().await;
         Ok(())

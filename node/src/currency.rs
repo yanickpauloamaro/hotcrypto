@@ -119,4 +119,12 @@ impl SignedTransaction {
         
         return tx;
     }
+
+    pub fn from_vec(vec: Vec<u8>) -> SignedTransaction {
+        
+        let tx = bincode::deserialize(&vec)
+            .expect("Failed to deserialize a transaction");
+        
+        return tx;
+    }
 }

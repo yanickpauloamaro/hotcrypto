@@ -77,11 +77,12 @@ class LocalBench:
 
             # Run the clients (they will wait for the nodes to be ready).
             addresses = committee.front
+            request_ports = committee.request_ports
             rate_share = ceil(rate / nodes)
             timeout = self.node_parameters.timeout_delay
             client_logs = [PathMaker.client_log_file(i) for i in range(nodes)]
 
-            for addr, log_file in zip(addresses, client_logs):
+            for addr, port, log_file in zip(addresses, request_ports, client_logs):
                 cmd = CommandMaker.run_client(
                     addr,
                     self.tx_size,
@@ -93,12 +94,13 @@ class LocalBench:
             # Run the nodes.
             dbs = [PathMaker.db_path(i) for i in range(nodes)]
             node_logs = [PathMaker.node_log_file(i) for i in range(nodes)]
-            for key_file, db, log_file in zip(key_files, dbs, node_logs):
+            for key_file, db, log_file, port in zip(key_files, dbs, node_logs, request_ports):
                 cmd = CommandMaker.run_node(
                     key_file,
                     PathMaker.committee_file(),
                     db,
                     PathMaker.parameters_file(),
+                    port,
                     debug=debug
                 )
                 self._background_run(cmd, log_file)

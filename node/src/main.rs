@@ -66,8 +66,8 @@ async fn main() {
             let committee_file = subm.value_of("committee").unwrap();
             let parameters_file = subm.value_of("parameters");
             let store_path = subm.value_of("store").unwrap();
-
             let port = subm.value_of("port").unwrap();
+
             match Node::new(committee_file, key_file, store_path, parameters_file, port).await {
                 Ok(mut node) => {
                     tokio::spawn(async move {

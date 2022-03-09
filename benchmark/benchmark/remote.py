@@ -221,6 +221,7 @@ class Bench:
                 PathMaker.committee_file(),
                 db,
                 PathMaker.parameters_file(),
+                self.settings.request_port,
                 debug=debug
             )
             self._background_run(host, cmd, log_file)

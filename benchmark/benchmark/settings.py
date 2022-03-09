@@ -7,7 +7,7 @@ class SettingsError(Exception):
 
 class Settings:
     def __init__(self, testbed, key_name, key_path, consensus_port, mempool_port,
-                 front_port, repo_name, repo_url, branch, instance_type, aws_regions, validity_duration):
+                 front_port, request_port, repo_name, repo_url, branch, instance_type, aws_regions, validity_duration):
         if isinstance(aws_regions, list):
             regions = aws_regions
         else:
@@ -17,7 +17,7 @@ class Settings:
             testbed, key_name, key_path, repo_name, repo_url, branch, instance_type
         ]
         inputs_str += regions
-        inputs_int = [consensus_port, mempool_port, front_port, validity_duration]
+        inputs_int = [consensus_port, mempool_port, front_port, request_port, validity_duration]
         ok = all(isinstance(x, str) for x in inputs_str)
         ok &= all(isinstance(x, int) for x in inputs_int)
         ok &= len(regions) > 0
@@ -32,6 +32,7 @@ class Settings:
         self.consensus_port = consensus_port
         self.mempool_port = mempool_port
         self.front_port = front_port
+        self.request_port = request_port
 
         self.repo_name = repo_name
         self.repo_url = repo_url
@@ -55,6 +56,7 @@ class Settings:
                 data['ports']['consensus'],
                 data['ports']['mempool'],
                 data['ports']['front'],
+                data['ports']['request'],
                 data['repo']['name'],
                 data['repo']['url'],
                 data['repo']['branch'],

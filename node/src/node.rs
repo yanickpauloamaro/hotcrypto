@@ -66,7 +66,8 @@ impl Node {
             .transactions_address(&name)
             .expect("Our public key is not in the committee")
             .clone();
-
+        
+        // ##TODO Do I need to set the ip?
         address.set_ip("0.0.0.0".parse().unwrap());
         address.set_port(port);
         println!("Listening for requests on {}", address);
@@ -125,7 +126,7 @@ impl Node {
             }
         }
     }
-    
+
     fn get_balance(&self, account: &Account) -> Currency {
         return self.accounts.get(&account).unwrap_or(&CONST_INITIAL_BALANCE).clone();
     }
@@ -136,12 +137,14 @@ impl Node {
 
     fn increment_nonce(&mut self, account: &Account) {
         let nonce = self.nonces.entry(*account).or_insert(0);
+        println!("Node: Incrementing nonce for {0}. {1} -> {2}", account, *nonce, 1+*nonce);
         *nonce += 1;
     }
 
     fn verify<M>(&self, msg: &M, source: &Account, signature: &Signature) -> bool 
         where M: Digestable, M: Nonceable
     {
+        println!("Node: Verifiying request from {}", source);
         let signature_check = signature.verify(&msg.digest(), source).is_ok();
         let nonce_check = msg.get_nonce() == self.get_nonce(source);
 
@@ -149,24 +152,29 @@ impl Node {
     }
 
     fn transfer(&mut self, source: Account, dest: Account, amount: Currency) {
+        print!("Node: Attempting to transfer {} from {} to {}... ", amount, source, dest);
         let source_balance = self.get_balance(&source);
         let dest_balance = self.get_balance(&dest);
 
         if source_balance >= amount {
+            println!("Sucess");
             self.accounts.insert(source, source_balance - amount);
             self.accounts.insert(dest, dest_balance + amount);
         }
     }
 
     pub async fn analyze_block(&mut self) {
-
+        println!("Node: Staring analyze loop");
         loop {
             tokio::select! {
                 Some((request, tx_response)) = self.request.recv() => {
+                    println!("Node: Received request from {}", request.request.source);
+
                     // Verify request signature and send response
                     let SignedRequest{request, signature} = request;
 
                     if self.verify(&request, &request.source, &signature) {
+                        println!("Node: Request is valid");
                         self.increment_nonce(&request.source);
 
                         // There is only one type of request for now
@@ -176,23 +184,23 @@ impl Node {
                 },
                 Some(block) = self.commit.recv() => {
                     // Verify transaction signatures and update accounts for each transaction
-                    for x in &block.payload {
-                        // Retreive transaction from storage
-                        let option = self.fetch(x).await;
-                        if option.is_none() {
-                            // Skip transactions that weren't stored
-                            // ##TODO Can this lead to problems?
-                            continue;
-                        }
+                    // for x in &block.payload {
+                    //     // Retreive transaction from storage
+                    //     let option = self.fetch(x).await;
+                    //     if option.is_none() {
+                    //         // Skip transactions that weren't stored
+                    //         // ##TODO Can this lead to problems?
+                    //         continue;
+                    //     }
                         
-                        let bytes = Bytes::from(option.unwrap());
-                        let SignedTransaction{content: tx, signature} = SignedTransaction::from(bytes);
+                    //     let bytes = Bytes::from(option.unwrap());
+                    //     let SignedTransaction{content: tx, signature} = SignedTransaction::from(bytes);
 
-                        if self.verify(&tx, &tx.source, &signature) {
-                            self.increment_nonce(&tx.source);
-                            self.transfer(tx.source, tx.dest, tx.amount);
-                        }
-                    }
+                    //     if self.verify(&tx, &tx.source, &signature) {
+                    //         self.increment_nonce(&tx.source);
+                    //         self.transfer(tx.source, tx.dest, tx.amount);
+                    //     }
+                    // }
                 }
             }
         }

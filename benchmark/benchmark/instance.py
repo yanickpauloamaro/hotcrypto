@@ -140,6 +140,19 @@ class InstanceManager:
                         'Description': 'Front end to accept clients transactions',
                     }],
                 },
+                {
+                    'IpProtocol': 'tcp',
+                    'FromPort': self.settings.request_port,
+                    'ToPort': self.settings.request_port,
+                    'IpRanges': [{
+                        'CidrIp': '0.0.0.0/0',
+                        'Description': 'Front end to accept clients requests',
+                    }],
+                    'Ipv6Ranges': [{
+                        'CidrIpv6': '::/0',
+                        'Description': 'Front end to accept clients requests',
+                    }],
+                },
             ]
         )
 

@@ -1,6 +1,6 @@
 use crate::config::Export as _;
 use crate::config::{Committee, ConfigError, Parameters, Secret};
-use crate::currency::{Account, SignedRequest, Currency, SignedTransaction, CONST_INITIAL_BALANCE};
+use crate::currency::{Account, Nonceable, Nonce, SignedRequest, Currency, SignedTransaction, CONST_INITIAL_BALANCE};
 
 use consensus::{Block, Consensus};
 use crypto::{SignatureService, Digest};
@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use tokio::time::{sleep, Duration};
 use tokio::sync::oneshot;
 use futures::sink::SinkExt as _;
-use crypto::{Signature, PublicKey, Hash as Digestable};
+use crypto::{Signature, Hash as Digestable};
 
 /// The default channel capacity for this module.
 pub const CHANNEL_CAPACITY: usize = 1_000;
@@ -25,7 +25,9 @@ pub const CHANNEL_CAPACITY: usize = 1_000;
 pub struct Node {
     pub commit: Receiver<Block>,
     pub request: Receiver<(SignedRequest, oneshot::Sender<Currency>)>,
-    pub store: Store
+    pub store: Store,
+    pub accounts: HashMap<Account, Currency>,
+    pub nonces: HashMap<Account, Nonce>
 }
 
 impl Node {
@@ -97,7 +99,11 @@ impl Node {
         );
 
         info!("Node {} successfully booted", name);
-        Ok(Self { commit: rx_commit, request: rx_request, store: store})
+        Ok(Self { commit: rx_commit,
+                request: rx_request,
+                store: store,
+                accounts: HashMap::new(),
+                nonces: HashMap::new()})
     }
 
     pub fn print_key_file(filename: &str) -> Result<(), ConfigError> {
@@ -119,30 +125,40 @@ impl Node {
             }
         }
     }
-
-    fn get_balance(account: &Account, accounts: &mut HashMap<Account, Currency>) -> Currency {
-        return accounts.get(&account).unwrap_or(&CONST_INITIAL_BALANCE).clone();
+    
+    fn get_balance(&self, account: &Account) -> Currency {
+        return self.accounts.get(&account).unwrap_or(&CONST_INITIAL_BALANCE).clone();
     }
 
-    fn verify_signature<D>(msg: &D, key: &PublicKey, signature: &Signature) -> bool 
-        where D: Digestable
+    fn get_nonce(&self, account: &Account) -> u64 {
+        return self.nonces.get(&account).unwrap_or(&0u64).clone();
+    }
+
+    fn increment_nonce(&mut self, account: &Account) {
+        let nonce = self.nonces.entry(*account).or_insert(0);
+        *nonce += 1;
+    }
+
+    fn verify<M>(&self, msg: &M, source: &Account, signature: &Signature) -> bool 
+        where M: Digestable, M: Nonceable
     {
-        return signature.verify(&msg.digest(), key).is_ok();
+        let signature_check = signature.verify(&msg.digest(), source).is_ok();
+        let nonce_check = msg.get_nonce() == self.get_nonce(source);
+
+        return signature_check && nonce_check;
     }
 
-    fn transfer(source: Account, dest: Account, amount: Currency, accounts: &mut HashMap<Account, Currency>) {
-        let source_balance = Node::get_balance(&source, accounts);
-        let dest_balance = Node::get_balance(&dest, accounts);
+    fn transfer(&mut self, source: Account, dest: Account, amount: Currency) {
+        let source_balance = self.get_balance(&source);
+        let dest_balance = self.get_balance(&dest);
 
         if source_balance >= amount {
-            accounts.insert(source, source_balance - amount);
-            accounts.insert(dest, dest_balance - amount);
+            self.accounts.insert(source, source_balance - amount);
+            self.accounts.insert(dest, dest_balance + amount);
         }
     }
 
     pub async fn analyze_block(&mut self) {
-
-        let mut accounts: HashMap<Account, Currency> = HashMap::new();
 
         loop {
             tokio::select! {
@@ -150,14 +166,16 @@ impl Node {
                     // Verify request signature and send response
                     let SignedRequest{request, signature} = request;
 
-                    if Node::verify_signature(&request, &request.source, &signature) {
+                    if self.verify(&request, &request.source, &signature) {
+                        self.increment_nonce(&request.source);
+
                         // There is only one type of request for now
-                        let balance = Node::get_balance(&request.source, &mut accounts);
+                        let balance = self.get_balance(&request.source);
                         let _err = tx_response.send(balance);
                     }
                 },
                 Some(block) = self.commit.recv() => {
-                    // Verify transaction signatures and update accounts
+                    // Verify transaction signatures and update accounts for each transaction
                     for x in &block.payload {
                         // Retreive transaction from storage
                         let option = self.fetch(x).await;
@@ -170,8 +188,9 @@ impl Node {
                         let bytes = Bytes::from(option.unwrap());
                         let SignedTransaction{content: tx, signature} = SignedTransaction::from(bytes);
 
-                        if Node::verify_signature(&tx, &tx.source, &signature){
-                            Node::transfer(tx.source, tx.dest, tx.amount, &mut accounts);
+                        if self.verify(&tx, &tx.source, &signature) {
+                            self.increment_nonce(&tx.source);
+                            self.transfer(tx.source, tx.dest, tx.amount);
                         }
                     }
                 }

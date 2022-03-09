@@ -6,6 +6,16 @@ use std::hash::Hash;
 use ed25519_dalek::Digest as _;
 use std::convert::TryInto;
 
+pub type Currency = u64;
+pub const CONST_INITIAL_BALANCE: Currency = 100;
+
+pub type Account = PublicKey;
+
+pub type Nonce = u64;
+pub trait Nonceable {
+    fn get_nonce(&self) -> u64;
+}
+
 #[derive(Serialize, Deserialize, Hash, Debug)]
 pub enum RequestType {
     Balance
@@ -40,16 +50,17 @@ impl Digestable for Request {
     }
 }
 
+impl Nonceable for Request {
+    fn get_nonce(&self) -> u64 {
+        return self.nonce.clone();
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SignedRequest {
     pub request: Request,
     pub signature: Signature
 }
-
-pub type Currency = u64;
-pub const CONST_INITIAL_BALANCE: Currency = 100;
-
-pub type Account = PublicKey;
 
 /* 
 Une transaction doit contenir à minima:
@@ -75,6 +86,12 @@ impl Digestable for Transaction {
         hasher.update(self.amount.to_le_bytes());
         hasher.update(self.nonce.to_le_bytes());
         Digest(hasher.finalize().as_slice()[..32].try_into().unwrap())
+    }
+}
+
+impl Nonceable for Transaction {
+    fn get_nonce(&self) -> u64 {
+        return self.nonce.clone();
     }
 }
 

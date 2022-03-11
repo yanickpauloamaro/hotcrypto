@@ -1,3 +1,5 @@
+use crate::config::Export;
+
 use crypto::{PublicKey, Signature, Hash as Digestable, Digest};
 use ed25519_dalek::Sha512;
 use serde::{Deserialize, Serialize};
@@ -10,6 +12,13 @@ pub type Currency = u64;
 pub const CONST_INITIAL_BALANCE: Currency = 100;
 
 pub type Account = PublicKey;
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct Register {
+    pub accounts: Vec<Account>
+}
+
+impl Export for Register {}
 
 pub type Nonce = u64;
 pub trait Nonceable {
@@ -64,11 +73,13 @@ pub struct SignedRequest {
 
 /* 
 Une transaction doit contenir à minima:
-  - l'adresse de l'émetteur (disons 32 bytes)
-  - la quantité à transférer (8 bytes)
-  - l'adresse du recepteur (32 bytes)
-  - une signature (48 bytes)
-donc 120 bytes
+  - l'adresse de l'émetteur (disons 32 bytes)   : bincode_size = 52 bytes
+  - la quantité à transférer (8 bytes)          : bincode_size = 8 bytes
+  - l'adresse du recepteur (32 bytes)           : bincode_size = 52 bytes
+  - une signature (48 bytes)                    : bincode_size = 64 bytes
+  + nonce                                       : bincode_size = 8 bytes
+  
+donc 120 bytes : bincode_size = 184 bytes
 */
 #[derive(Debug, Serialize, Deserialize, Hash)]
 pub struct Transaction {
@@ -81,7 +92,7 @@ pub struct Transaction {
 impl Digestable for Transaction {
     fn digest(&self) -> Digest {
         let mut hasher = Sha512::new();
-        hasher.update(self.source);
+        // hasher.update(self.source);
         hasher.update(self.dest);
         hasher.update(self.amount.to_le_bytes());
         hasher.update(self.nonce.to_le_bytes());
@@ -103,7 +114,6 @@ pub struct SignedTransaction {
 
 impl From<SignedTransaction> for Bytes {
     fn from(tx: SignedTransaction) -> Bytes {
-        // ##TODO: does this guarantee a consistent size?
         let serialized = bincode::serialize(&tx)
             .expect("Failed to serialize a transaction");
 

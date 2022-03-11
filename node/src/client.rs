@@ -1,27 +1,48 @@
+mod currency;
+mod node;
+mod config;
+
+use crate::config::Export as _;
+use crate::config::{ConfigError, Secret};
+
 use anyhow::{Context, Result};
 use bytes::BufMut as _;
 use bytes::BytesMut;
-use clap::{crate_name, crate_version, App, AppSettings};
+use clap::{crate_name, crate_version, App, AppSettings, SubCommand, ArgMatches};
 use env_logger::Env;
 use futures::future::join_all;
 use futures::sink::SinkExt as _;
-use log::{info, warn};
+use log::{info, warn, error};
 use rand::Rng;
 use std::net::SocketAddr;
 use tokio::net::TcpStream;
 use tokio::time::{interval, sleep, Duration, Instant};
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
 
+use currency::{SignedTransaction, Transaction, Account, Register};
+use crypto::{SecretKey, Signature, Hash as Digestable};
+use rand::seq::SliceRandom;
+use bytes::Bytes;
+
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() {
     let matches = App::new(crate_name!())
-        .version(crate_version!())
-        .about("Benchmark client for HotStuff nodes.")
-        .args_from_usage("<ADDR> 'The network address of the node where to send txs'")
-        .args_from_usage("--timeout=<INT> 'The nodes timeout value'")
-        .args_from_usage("--size=<INT> 'The size of each transaction in bytes'")
-        .args_from_usage("--rate=<INT> 'The rate (txs/s) at which to send the transactions'")
-        .args_from_usage("--nodes=[ADDR]... 'Network addresses that must be reachable before starting the benchmark.'")
+        .version(crate_version!())        
+        .subcommand(
+            SubCommand::with_name("keys")
+                .about("Print a fresh key pair to file")
+                .args_from_usage("--filename=<FILE> 'The file where to print the new key pair'"),
+        ).subcommand(
+            SubCommand::with_name("run")
+                .about("Benchmark client for HotStuff nodes.")
+                .args_from_usage("<ADDR> 'The network address of the node where to send txs'")
+                .args_from_usage("--timeout=<INT> 'The nodes timeout value'")
+                .args_from_usage("--size=<INT> 'The size of each transaction in bytes'")
+                .args_from_usage("--rate=<INT> 'The rate (txs/s) at which to send the transactions'")
+                .args_from_usage("--nodes=[ADDR]... 'Network addresses that must be reachable before starting the benchmark.'")
+                .args_from_usage("--keys=<FILE> 'The file containing the node keys'")
+                .args_from_usage("--accounts=[FILE] 'The file containing accounts addresses'")
+        )        
         .setting(AppSettings::ArgRequiredElseHelp)
         .get_matches();
 
@@ -29,6 +50,21 @@ async fn main() -> Result<()> {
         .format_timestamp_millis()
         .init();
 
+    match matches.subcommand() {
+        ("keys", Some(subm)) => {
+            let filename = subm.value_of("filename").unwrap();
+            if let Err(e) = Client::print_key_file(filename) {
+                error!("{}", e);
+            }
+        }
+        ("run", Some(subm)) => {
+            let _ = run(subm).await;
+        }
+        _ => unreachable!()
+    }
+}
+
+async fn run<'a>(matches: &ArgMatches<'_>) -> Result<()> {
     let target = matches
         .value_of("ADDR")
         .unwrap()
@@ -57,16 +93,22 @@ async fn main() -> Result<()> {
         .collect::<Result<Vec<_>, _>>()
         .context("Invalid socket address format")?;
 
+    let key_file = matches.value_of("keys").unwrap();
+    let register_file = matches.value_of("accounts").unwrap();
+
     info!("Node address: {}", target);
     info!("Transactions size: {} B", size);
     info!("Transactions rate: {} tx/s", rate);
-    let client = Client {
+    
+    let client = Client::new(
         target,
         size,
         rate,
         timeout,
         nodes,
-    };
+        key_file,
+        register_file
+    ).context("Failed to create client")?;
 
     // Wait for all nodes to be online and synchronized.
     client.wait().await;
@@ -81,17 +123,56 @@ struct Client {
     rate: u64,
     timeout: u64,
     nodes: Vec<SocketAddr>,
+    secret_key: SecretKey,
+    account: Account,
+    register: Register
 }
 
 impl Client {
+    pub fn print_key_file(filename: &str) -> Result<(), ConfigError> {
+        Secret::new().write(filename)
+    }
+
+    pub fn new(
+        target: SocketAddr,
+        size: usize,
+        rate: u64,
+        timeout: u64,
+        nodes: Vec<SocketAddr>,
+        key_file: &str,
+        register_file: &str,
+    ) -> Result<Self, ConfigError> {
+
+        let secret = Secret::read(key_file)?;
+        let mut register = Register::read(register_file)?;
+        register.accounts.retain(|account| *account != secret.name);
+
+        Some(register.accounts.len())
+            .filter(|s| *s > 0)
+            .expect("There must be at least one other account");
+
+        Ok(Self{
+            target,
+            size,
+            rate,
+            timeout,
+            nodes,
+            secret_key: secret.secret,
+            account: secret.name,
+            register
+        })
+    }
+
     pub async fn send(&self) -> Result<()> {
         const PRECISION: u64 = 20; // Sample precision.
         const BURST_DURATION: u64 = 1000 / PRECISION;
 
-        // The transaction size must be at least 16 bytes to ensure all txs are different.
-        if self.size < 9 {
+        let transaction_size = self.transaction_size()
+            .expect("Unable to serialize transactions");
+
+        if (self.size as u64) < transaction_size {
             return Err(anyhow::Error::msg(
-                "Transaction size must be at least 9 bytes",
+                format!("Transaction size must be at least {} bytes", transaction_size)
             ));
         }
 
@@ -104,7 +185,8 @@ impl Client {
         let burst = self.rate / PRECISION;
         let mut tx = BytesMut::with_capacity(self.size);
         let mut counter = 0;
-        let mut r = rand::thread_rng().gen();
+        let mut nonce = 0;
+        let mut r = rand::thread_rng();
         let mut transport = Framed::new(stream, LengthDelimitedCodec::new());
         let interval = interval(Duration::from_millis(BURST_DURATION));
         tokio::pin!(interval);
@@ -117,25 +199,39 @@ impl Client {
             let now = Instant::now();
 
             for x in 0..burst {
+
+                let mut amount = 1;
                 if x == counter % burst {
                     // NOTE: This log entry is used to compute performance.
-                    info!("Sending sample transaction {}", counter);
-
-                    tx.put_u8(0u8); // Sample txs start with 0.
-                    tx.put_u64(counter); // This counter identifies the tx.
-                } else {
-                    r += 1;
-
-                    tx.put_u8(1u8); // Standard txs start with 1.
-                    tx.put_u64(r); // Ensures all clients send different txs.
+                    info!("Sending sample transaction {} from ", nonce, self.account);
+                    amount = 2; // This amount identifies sample transactions
                 };
+
+                let dest = *self.register.accounts.choose(&mut r).unwrap();
+
+                let transaction = Transaction{
+                    source: self.account,
+                    dest: dest,
+                    amount: amount,
+                    nonce: nonce
+                };
+
+                let signature = Signature::new(&transaction.digest(), &self.secret_key);
+                let signed = SignedTransaction{
+                    content: transaction,
+                    signature
+                };
+
+                tx.put(Bytes::from(signed));
                 tx.resize(self.size, 0u8);
                 let bytes = tx.split().freeze();
 
                 if let Err(e) = transport.send(bytes).await {
                     warn!("Failed to send transaction: {}", e);
                     break 'main;
-                }
+                };
+
+                nonce += 1;
             }
             if now.elapsed().as_millis() > BURST_DURATION as u128 {
                 // NOTE: This log entry is used to compute performance.
@@ -144,6 +240,23 @@ impl Client {
             counter += 1;
         }
         Ok(())
+    }
+
+    fn transaction_size(&self) -> bincode::Result<u64> {
+        let transaction = Transaction{
+            source: self.account,
+            dest: self.account,
+            amount: 0,
+            nonce: 0
+        };
+
+        let signature = Signature::new(&transaction.digest(), &self.secret_key);
+        let signed = SignedTransaction{
+            content: transaction,
+            signature
+        };
+
+        return bincode::serialized_size(&signed);
     }
 
     pub async fn wait(&self) {

@@ -147,13 +147,13 @@ impl Client {
         let mut register = Register::read(register_file)?;
         register.accounts.retain(|account| *account != secret.name);
 
-        info!("Account {}", secret.name);
+        info!("Account {:?}", secret.name);
 
         Some(register.accounts.len())
             .filter(|s| *s > 0)
             .expect("There must be at least one other account");
 
-        info!("Other accounts {}", register.accounts);
+        info!("Other accounts {:?}", register.accounts);
 
         Ok(Self{
             target,
@@ -197,7 +197,7 @@ impl Client {
                 let mut amount = 1;
                 if x == counter % burst {
                     // NOTE: This log entry is used to compute performance.
-                    info!("Sending sample transaction {} from {}", nonce, self.account);
+                    info!("Sending sample transaction {} from {:?}", nonce, self.account);
                     amount = 2; // This amount identifies sample transactions
                 };
 

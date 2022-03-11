@@ -150,7 +150,7 @@ class Bench:
 
     def _update(self, hosts):
         Print.info(
-            f'Updating {len(hosts)} nodes (branch "{self.settings.branch}")...'
+            f'Updating {len(hosts)} nodes...'
         )
 
         # Using public IP to connect to the instances

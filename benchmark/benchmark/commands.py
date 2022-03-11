@@ -29,7 +29,7 @@ class CommandMaker:
         assert isinstance(keys, str)
         assert isinstance(committee, str)
         assert isinstance(parameters, str)
-        assert isinstance(port, str)
+        # assert isinstance(port, str)
         assert isinstance(debug, bool)
         v = '-vvv' if debug else '-vv'
         return (f'./node {v} run --keys {keys} --committee {committee} '
@@ -63,13 +63,6 @@ class CommandMaker:
     def remove_repo(filename):
         assert isinstance(filename, str)
         return f'rm -r {filename}'
-
-        @staticmethod
-    def upload_repo(ip, key, repo):
-        assert isinstance(ip, str)
-        assert isinstance(key, str)
-        assert isinstance(repo, str)
-        return f'scp -i {key} -r ../../{repo} ubuntu@{ip}:/home/ubuntu/{repo}'
 
     @staticmethod
     def compress_repo(repo, zip_name):

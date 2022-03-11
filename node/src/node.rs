@@ -213,7 +213,7 @@ impl Node {
                                     if tx.amount == 2 {
                                         // ##TODO check that feature=benchmark works
                                         // NOTE: This log entry is used to compute performance.
-                                        info!("Processed sample transaction {} from {}", tx.nonce, tx.source);
+                                        info!("Processed sample transaction {} from {:?}", tx.nonce, tx.source);
                                     }
                                 }
                             },

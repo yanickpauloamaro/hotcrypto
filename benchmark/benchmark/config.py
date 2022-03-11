@@ -33,7 +33,8 @@ class Committee:
 
         self.json = {
             'consensus': self._build_consensus(),
-            'mempool': self._build_mempool()
+            'mempool': self._build_mempool(),
+            'request_ports': request_ports
         }
 
     def _build_consensus(self):
@@ -76,7 +77,8 @@ class Committee:
             x['transactions_address'] for x in mempool_authorities
         ]
         mempool_addr = [x['mempool_address'] for x in mempool_authorities]
-        return cls(names, consensus_addr, transactions_addr, mempool_addr)
+        requests_ports = data['request_ports']
+        return cls(names, consensus_addr, transactions_addr, mempool_addr, requests_ports)
 
 
 class LocalCommittee(Committee):
@@ -91,7 +93,7 @@ class LocalCommittee(Committee):
         request_ports = [f'{port + i + 3*size}' for i in range(size)]
         super().__init__(names, consensus, front, mempool, request_ports)
 
-class LocalRegister:    ##
+class Register:    ##
     def __init__(self, names):
         assert isinstance(names, list) and all(
             isinstance(x, str) for x in names)

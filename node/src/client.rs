@@ -147,9 +147,13 @@ impl Client {
         let mut register = Register::read(register_file)?;
         register.accounts.retain(|account| *account != secret.name);
 
+        info!("Account {}", secret.name);
+
         Some(register.accounts.len())
             .filter(|s| *s > 0)
             .expect("There must be at least one other account");
+
+        info!("Other accounts {}", register.accounts);
 
         Ok(Self{
             target,

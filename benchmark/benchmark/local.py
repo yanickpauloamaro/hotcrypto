@@ -4,7 +4,7 @@ from os.path import basename, splitext
 from time import sleep
 
 from benchmark.commands import CommandMaker
-from benchmark.config import Key, LocalCommittee, LocalRegister, NodeParameters, BenchParameters, ConfigError
+from benchmark.config import Key, LocalCommittee, Register, NodeParameters, BenchParameters, ConfigError
 from benchmark.logs import LogParser, ParseError
 from benchmark.utils import Print, BenchError, PathMaker
 
@@ -76,10 +76,10 @@ class LocalBench:
 
             names = [x.name for x in keys]
             client_names = [x.name for x in client_keys]    ##
-            register = LocalRegister(client_names)  ##
-            register.print(PathMaker.register_file())   ##
             committee = LocalCommittee(names, self.BASE_PORT)
             committee.print(PathMaker.committee_file())
+            register = Register(client_names)  ##
+            register.print(PathMaker.register_file())   ##
 
             self.node_parameters.print(PathMaker.parameters_file())
 

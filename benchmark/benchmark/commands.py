@@ -58,3 +58,26 @@ class CommandMaker:
         assert isinstance(origin, str)
         node, client = join(origin, 'node'), join(origin, 'client')
         return f'rm node ; rm client ; ln -s {node} . ; ln -s {client} .'
+
+    @staticmethod
+    def remove_repo(filename):
+        assert isinstance(filename, str)
+        return f'rm -r {filename}'
+
+        @staticmethod
+    def upload_repo(ip, key, repo):
+        assert isinstance(ip, str)
+        assert isinstance(key, str)
+        assert isinstance(repo, str)
+        return f'scp -i {key} -r ../../{repo} ubuntu@{ip}:/home/ubuntu/{repo}'
+
+    @staticmethod
+    def compress_repo(repo, zip_name):
+        assert isinstance(repo, str)
+        assert isinstance(zip_name, str)
+        return f'zip -r ../../{zip_name}.zip ../../{repo} -q -x \'*target*\''
+
+    @staticmethod
+    def decompress_repo(zip_name):
+        assert isinstance(zip_name, str)
+        return f'unzip -uo {zip_name}.zip'

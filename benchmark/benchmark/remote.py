@@ -1,3 +1,5 @@
+from atexit import register
+from distutils.command.upload import upload
 from fabric import Connection, ThreadingGroup as Group
 from fabric.exceptions import GroupException
 from paramiko import RSAKey
@@ -8,7 +10,7 @@ from math import ceil
 from os.path import join
 import subprocess
 
-from benchmark.config import Committee, Key, NodeParameters, BenchParameters, ConfigError
+from benchmark.config import Committee, Key, NodeParameters, BenchParameters, ConfigError, Register
 from benchmark.utils import BenchError, Print, PathMaker, progress_bar
 from benchmark.commands import CommandMaker
 from benchmark.logs import LogParser, ParseError
@@ -50,6 +52,7 @@ class Bench:
                 raise ExecutionError(output.stderr)
 
     def install(self):
+
         Print.info('Installing rust and cloning the repo...')
         cmd = [
             'sudo apt-get update',
@@ -69,12 +72,19 @@ class Bench:
             'sudo apt-get install -y clang',
 
             # Clone the repo.
-            f'(git clone {self.settings.repo_url} || (cd {self.settings.repo_name} ; git pull))'
+            f'sudo apt-get install -y unzip',
+            f'unzip {self.settings.repo_name}.zip',
+            f'cd {self.settings.repo_name}'
         ]
         hosts = self.manager.hosts(flat=True)
+
         try:
             ## Using public IP to connect to the instances
             public_ips = [x.public for x in hosts]
+
+            ## Send repo to the instances
+            self._upload(public_ips)
+
             g = Group(*public_ips, user='ubuntu', connect_kwargs=self.connect)
             g.run(' && '.join(cmd), hide=True)
             Print.heading(f'Initialized testbed of {len(hosts)} nodes')
@@ -95,6 +105,28 @@ class Bench:
             g.run(' && '.join(cmd), hide=True)
         except GroupException as e:
             raise BenchError('Failed to kill nodes', FabricError(e))
+
+    def _upload(self, public_ips):
+        Print.info('Compressing repo...')
+        filename = self.settings.repo_name
+        zip_name = self.settings.repo_name
+        cmd = CommandMaker.compress_repo(filename, zip_name)
+        subprocess.run([cmd], check=True, shell=True)
+
+        # Upload configuration files.
+        progress = progress_bar(public_ips, prefix='Uploading repo:')
+        for _, host in enumerate(progress):
+            c = Connection(host, user='ubuntu', connect_kwargs=self.connect)
+            c.put(f'../../{zip_name}.zip', '.')
+
+        Print.info('Decompressing...')
+        decompress = CommandMaker.decompress_repo(self.settings.repo_name)
+        cmd = [
+            f'(({decompress}) || true)'
+        ]
+
+        g = Group(*public_ips, user='ubuntu', connect_kwargs=self.connect)
+        g.run(' && '.join(cmd), hide=True)
 
     def _select_hosts(self, bench_parameters):
         nodes = max(bench_parameters.nodes)
@@ -120,18 +152,24 @@ class Bench:
         Print.info(
             f'Updating {len(hosts)} nodes (branch "{self.settings.branch}")...'
         )
+
+        # Using public IP to connect to the instances
+        public_ips = [x.public for x in hosts]
+
+        ## Reupload code
+        self._upload(public_ips)
+
+        ## Recompile code
+        Print.info(f'Recompiling...')
         cmd = [
-            f'(cd {self.settings.repo_name} && git fetch -f)',
-            f'(cd {self.settings.repo_name} && git checkout -f {self.settings.branch})',
-            f'(cd {self.settings.repo_name} && git pull -f)',
             'source $HOME/.cargo/env',
             f'(cd {self.settings.repo_name}/node && {CommandMaker.compile()})',
             CommandMaker.alias_binaries(
                 f'./{self.settings.repo_name}/target/release/'
             )
         ]
+
         # Using public IP to connect to the instances
-        public_ips = [x.public for x in hosts]
         g = Group(*public_ips, user='ubuntu', connect_kwargs=self.connect)
         g.run(' && '.join(cmd), hide=True)
 
@@ -150,7 +188,7 @@ class Bench:
         cmd = CommandMaker.alias_binaries(PathMaker.binary_path())
         subprocess.run([cmd], shell=True)
 
-        # Generate configuration files.
+        # Generate configuration files for nodes.
         keys = []
         key_files = [PathMaker.key_file(i) for i in range(len(hosts))]
         for filename in key_files:
@@ -158,13 +196,25 @@ class Bench:
             subprocess.run(cmd, check=True)
             keys += [Key.from_file(filename)]
 
+        # Generate configuration files for clients. ##
+        client_keys = []
+        client_key_files = [PathMaker.key_file(i, 'client') for i in range(len(hosts))]
+        for filename in client_key_files:
+            cmd = CommandMaker.generate_key(filename, 'client').split()
+            subprocess.run(cmd, check=True)
+            client_keys += [Key.from_file(filename)]
+
         names = [x.name for x in keys]
+        client_names = [x.name for x in client_keys]    ##
         # Using private IP to communicate between nodes
         consensus_addr = [f'{x.private}:{self.settings.consensus_port}' for x in hosts]
         front_addr = [f'{x.private}:{self.settings.front_port}' for x in hosts]
         mempool_addr = [f'{x.private}:{self.settings.mempool_port}' for x in hosts]
-        committee = Committee(names, consensus_addr, front_addr, mempool_addr)
+        request_ports = [f'{self.settings.request_port}' for x in hosts]    ##
+        committee = Committee(names, consensus_addr, front_addr, mempool_addr, request_ports)
         committee.print(PathMaker.committee_file())
+        register = Register(client_names)  ##
+        register.print(PathMaker.register_file())   ##
 
         node_parameters.print(PathMaker.parameters_file())
 
@@ -182,7 +232,9 @@ class Bench:
             c = Connection(host.public, user='ubuntu', connect_kwargs=self.connect)
             c.put(PathMaker.committee_file(), '.')
             c.put(PathMaker.key_file(i), '.')
+            c.put(PathMaker.key_file(i, 'client'), '.')
             c.put(PathMaker.parameters_file(), '.')
+            c.put(PathMaker.register_file(), '.')
 
         return committee
 
@@ -200,14 +252,17 @@ class Bench:
         rate_share = ceil(rate / committee.size())  # Take faults into account.
         timeout = node_parameters.timeout_delay
         client_logs = [PathMaker.client_log_file(i) for i in range(len(hosts))]
+        client_key_files = [PathMaker.key_file(i, 'client') for i in range(len(hosts))] ##
 
-        for host, addr, log_file in zip(hosts, addresses, client_logs):
+        for host, key_file, addr, log_file in zip(hosts, client_key_files, addresses, client_logs):
             cmd = CommandMaker.run_client(
                 addr,
                 bench_parameters.tx_size,
                 rate_share,
                 timeout,
-                nodes=addresses
+                key_file,
+                PathMaker.register_file(),
+                nodes=addresses,
             )
             self._background_run(host, cmd, log_file)
 

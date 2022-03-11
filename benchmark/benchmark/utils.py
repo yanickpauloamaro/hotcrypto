@@ -23,13 +23,17 @@ class PathMaker:
         return '.committee.json'
 
     @staticmethod
+    def register_file():    ##
+        return '.register.json'
+
+    @staticmethod
     def parameters_file():
         return '.parameters.json'
 
     @staticmethod
-    def key_file(i):
+    def key_file(i, bin='node'):    ##
         assert isinstance(i, int) and i >= 0
-        return f'.node-{i}.json'
+        return f'.{bin}-{i}.json'
 
     @staticmethod
     def db_path(i):

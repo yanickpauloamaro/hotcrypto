@@ -4,7 +4,7 @@ from os.path import basename, splitext
 from time import sleep
 
 from benchmark.commands import CommandMaker
-from benchmark.config import Key, LocalCommittee, NodeParameters, BenchParameters, ConfigError
+from benchmark.config import Key, LocalCommittee, LocalRegister, NodeParameters, BenchParameters, ConfigError
 from benchmark.logs import LogParser, ParseError
 from benchmark.utils import Print, BenchError, PathMaker
 
@@ -58,7 +58,7 @@ class LocalBench:
             cmd = CommandMaker.alias_binaries(PathMaker.binary_path())
             subprocess.run([cmd], shell=True)
 
-            # Generate configuration files.
+            # Generate configuration files for nodes.
             keys = []
             key_files = [PathMaker.key_file(i) for i in range(nodes)]
             for filename in key_files:
@@ -66,7 +66,18 @@ class LocalBench:
                 subprocess.run(cmd, check=True)
                 keys += [Key.from_file(filename)]
 
+            # Generate configuration files for clients. ##
+            client_keys = []
+            client_key_files = [PathMaker.key_file(i, 'client') for i in range(nodes)]
+            for filename in client_key_files:
+                cmd = CommandMaker.generate_key(filename, 'client').split()
+                subprocess.run(cmd, check=True)
+                client_keys += [Key.from_file(filename)]
+
             names = [x.name for x in keys]
+            client_names = [x.name for x in client_keys]    ##
+            register = LocalRegister(client_names)  ##
+            register.print(PathMaker.register_file())   ##
             committee = LocalCommittee(names, self.BASE_PORT)
             committee.print(PathMaker.committee_file())
 
@@ -82,12 +93,14 @@ class LocalBench:
             timeout = self.node_parameters.timeout_delay
             client_logs = [PathMaker.client_log_file(i) for i in range(nodes)]
 
-            for addr, port, log_file in zip(addresses, request_ports, client_logs):
+            for key_file, addr, port, log_file in zip(client_key_files, addresses, request_ports, client_logs):
                 cmd = CommandMaker.run_client(
                     addr,
                     self.tx_size,
                     rate_share,
-                    timeout
+                    timeout,
+                    key_file, ##
+                    PathMaker.register_file()
                 )
                 self._background_run(cmd, log_file)
 
@@ -104,7 +117,6 @@ class LocalBench:
                     debug=debug
                 )
                 self._background_run(cmd, log_file)
-                count = count + 1
 
             # Wait for the nodes to synchronize
             Print.info('Waiting for the nodes to synchronize...')

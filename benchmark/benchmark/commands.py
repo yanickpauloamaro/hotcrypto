@@ -20,9 +20,9 @@ class CommandMaker:
         return 'cargo build --quiet --release --features benchmark'
 
     @staticmethod
-    def generate_key(filename):
+    def generate_key(filename, bin='node'):
         assert isinstance(filename, str)
-        return f'./node keys --filename {filename}'
+        return f'./{bin} keys --filename {filename}'
 
     @staticmethod
     def run_node(keys, committee, store, parameters, port, debug=False):
@@ -36,15 +36,18 @@ class CommandMaker:
                 f'--store {store} --parameters {parameters} --port {port}')
 
     @staticmethod
-    def run_client(address, size, rate, timeout, nodes=[]):
+    def run_client(address, size, rate, timeout, keys, register_file, nodes=[]):
         assert isinstance(address, str)
         assert isinstance(size, int) and size > 0
         assert isinstance(rate, int) and rate >= 0
         assert isinstance(nodes, list)
+        assert isinstance(keys, str)
+        assert isinstance(register_file, str)
         assert all(isinstance(x, str) for x in nodes)
         nodes = f'--nodes {" ".join(nodes)}' if nodes else ''
-        return (f'./client {address} --size {size} '
-                f'--rate {rate} --timeout {timeout} {nodes}')
+        return (f'./client run {address} --size {size} '
+                f'--rate {rate} --timeout {timeout} '
+                f'--keys {keys} --accounts {register_file} {nodes}')
 
     @staticmethod
     def kill():

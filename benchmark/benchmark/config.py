@@ -91,6 +91,18 @@ class LocalCommittee(Committee):
         request_ports = [f'{port + i + 3*size}' for i in range(size)]
         super().__init__(names, consensus, front, mempool, request_ports)
 
+class LocalRegister:    ##
+    def __init__(self, names):
+        assert isinstance(names, list) and all(
+            isinstance(x, str) for x in names)
+        self.json = {
+            'accounts': names
+        }
+
+    def print(self, filename):
+        assert isinstance(filename, str)
+        with open(filename, 'w') as f:
+            dump(self.json, f, indent=4, sort_keys=True)
 
 class NodeParameters:
     def __init__(self, json):

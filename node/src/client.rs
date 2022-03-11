@@ -167,15 +167,6 @@ impl Client {
         const PRECISION: u64 = 20; // Sample precision.
         const BURST_DURATION: u64 = 1000 / PRECISION;
 
-        let transaction_size = self.transaction_size()
-            .expect("Unable to serialize transactions");
-
-        if (self.size as u64) < transaction_size {
-            return Err(anyhow::Error::msg(
-                format!("Transaction size must be at least {} bytes", transaction_size)
-            ));
-        }
-
         // Connect to the mempool.
         let stream = TcpStream::connect(self.target)
             .await
@@ -183,7 +174,6 @@ impl Client {
 
         // Submit all transactions.
         let burst = self.rate / PRECISION;
-        let mut tx = BytesMut::with_capacity(self.size);
         let mut counter = 0;
         let mut nonce = 0;
         let mut r = rand::thread_rng();
@@ -203,7 +193,7 @@ impl Client {
                 let mut amount = 1;
                 if x == counter % burst {
                     // NOTE: This log entry is used to compute performance.
-                    info!("Sending sample transaction {} from ", nonce, self.account);
+                    info!("Sending sample transaction {} from {}", nonce, self.account);
                     amount = 2; // This amount identifies sample transactions
                 };
 
@@ -222,9 +212,7 @@ impl Client {
                     signature
                 };
 
-                tx.put(Bytes::from(signed));
-                tx.resize(self.size, 0u8);
-                let bytes = tx.split().freeze();
+                let bytes = Bytes::from(signed);
 
                 if let Err(e) = transport.send(bytes).await {
                     warn!("Failed to send transaction: {}", e);
@@ -240,23 +228,6 @@ impl Client {
             counter += 1;
         }
         Ok(())
-    }
-
-    fn transaction_size(&self) -> bincode::Result<u64> {
-        let transaction = Transaction{
-            source: self.account,
-            dest: self.account,
-            amount: 0,
-            nonce: 0
-        };
-
-        let signature = Signature::new(&transaction.digest(), &self.secret_key);
-        let signed = SignedTransaction{
-            content: transaction,
-            signature
-        };
-
-        return bincode::serialized_size(&signed);
     }
 
     pub async fn wait(&self) {

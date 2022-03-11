@@ -61,7 +61,9 @@ impl Node {
         // Run the signature service.
         let signature_service = SignatureService::new(secret_key);
 
-        let port = port.parse::<u16>().expect("Failed to parse node port");
+        let port = port.parse::<u16>()
+            .expect("Failed to parse node port");
+
         let mut address = committee.mempool
             .transactions_address(&name)
             .expect("Our public key is not in the committee")
@@ -205,6 +207,13 @@ impl Node {
                                         info!("Transaction is valid");
                                         self.increment_nonce(&tx.source);
                                         self.transfer(tx.source, tx.dest, tx.amount);
+                                    }
+
+                                    #[cfg(feature = "benchmark")]
+                                    if tx.amount == 2 {
+                                        // ##TODO check that feature=benchmark works
+                                        // NOTE: This log entry is used to compute performance.
+                                        info!("Processed sample transaction {} from {}", tx.nonce, tx.source);
                                     }
                                 }
                             },

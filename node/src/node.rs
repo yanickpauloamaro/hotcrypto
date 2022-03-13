@@ -68,7 +68,7 @@ impl Node {
             .transactions_address(&name)
             .expect("Our public key is not in the committee")
             .clone();
-        
+
         // ##TODO Do I need to set the ip?
         address.set_ip("0.0.0.0".parse().unwrap());
         address.set_port(port);
@@ -143,7 +143,7 @@ impl Node {
         *nonce += 1;
     }
 
-    fn verify<M>(&self, msg: &M, source: &Account, signature: &Signature) -> bool 
+    fn verify<M>(&self, msg: &M, source: &Account, signature: &Signature) -> bool
         where M: Digestable, M: Nonceable
     {
         info!("Verifiying transaction/request from {}", source);
@@ -188,7 +188,7 @@ impl Node {
                     if !block.payload.is_empty() {
                         debug!("Received block!");
                     }
-                    
+
                     for digest in &block.payload {
                         let serialized = self.store_read(digest)
                             .await
@@ -202,7 +202,7 @@ impl Node {
                             MempoolMessage::Batch(batch) => {
                                 for tx_vec in batch {
                                     let SignedTransaction{content: tx, signature} = SignedTransaction::from_vec(tx_vec);
-            
+
                                     if self.verify(&tx, &tx.source, &signature) {
                                         info!("Transaction is valid");
                                         self.increment_nonce(&tx.source);
@@ -210,10 +210,14 @@ impl Node {
                                     }
 
                                     #[cfg(feature = "benchmark")]
-                                    if tx.amount == 2 {
-                                        // ##TODO check that feature=benchmark works
+                                    {
+                                        if tx.amount == 2 {
+                                            // ##TODO check that feature=benchmark works
+                                            // NOTE: This log entry is used to compute performance.
+                                            info!("Processed sample transaction {} from {:?}", tx.nonce, tx.source);
+                                        }
                                         // NOTE: This log entry is used to compute performance.
-                                        info!("Processed sample transaction {} from {:?}", tx.nonce, tx.source);
+                                        info!("Currency commit");
                                     }
                                 }
                             },
@@ -251,7 +255,7 @@ impl MessageHandler for RequestReceiverHandler {
         let response: Currency = rx_response
             .await
             .expect("Failed to receive response from node");
-        
+
         let serialized = bincode::serialize(&response)
             .expect("Failed to serialize response");
 

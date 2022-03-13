@@ -27,7 +27,7 @@ use bytes::Bytes;
 #[tokio::main]
 async fn main() {
     let matches = App::new(crate_name!())
-        .version(crate_version!())        
+        .version(crate_version!())
         .subcommand(
             SubCommand::with_name("keys")
                 .about("Print a fresh key pair to file")
@@ -42,7 +42,7 @@ async fn main() {
                 .args_from_usage("--nodes=[ADDR]... 'Network addresses that must be reachable before starting the benchmark.'")
                 .args_from_usage("--keys=<FILE> 'The file containing the node keys'")
                 .args_from_usage("--accounts=[FILE] 'The file containing accounts addresses'")
-        )        
+        )
         .setting(AppSettings::ArgRequiredElseHelp)
         .get_matches();
 
@@ -99,7 +99,7 @@ async fn run<'a>(matches: &ArgMatches<'_>) -> Result<()> {
     info!("Node address: {}", target);
     info!("Transactions size: {} B", size);
     info!("Transactions rate: {} tx/s", rate);
-    
+
     let client = Client::new(
         target,
         size,

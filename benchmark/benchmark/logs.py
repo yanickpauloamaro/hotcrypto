@@ -41,7 +41,7 @@ class LogParser:
                 results = p.map(self._parse_nodes, nodes)
         except (ValueError, IndexError) as e:
             raise ParseError(f'Failed to parse node logs: {e}')
-        proposals, commits, sizes, self.received_samples, timeouts, self.configs \
+        proposals, commits, sizes, self.received_samples, timeouts, self.configs, currency_commits \
             = zip(*results)
         self.proposals = self._merge_results([x.items() for x in proposals])
         self.commits = self._merge_results([x.items() for x in commits])
@@ -49,6 +49,18 @@ class LogParser:
             k: v for x in sizes for k, v in x.items() if k in self.commits
         }
         self.timeouts = max(timeouts)
+
+        self.end = None
+        self.committed_tx = []
+        
+        ## c = transactions committed by a given client
+        for c in currency_commits:
+            self.committed_tx += [len(c)]
+
+            ## Find timestamp of last transaction to be committed
+            max_ts = max(c)
+            if self.end is None or max_ts > self.end:
+                self.end = max_ts
 
         # Check whether clients missed their target rate.
         if self.misses != 0:
@@ -82,8 +94,8 @@ class LogParser:
 
         misses = len(findall(r'rate too high', log))
 
-        tmp = findall(r'\[(.*Z) .* sample transaction (\d+)', log)
-        samples = {int(s): self._to_posix(t) for t, s in tmp}
+        tmp = findall(r'\[(.*Z) .* Sending sample transaction (\d+) from (.*)', log)    ##
+        samples = {(int(s), c): self._to_posix(t) for t, s, c in tmp}
 
         return size, rate, start, misses, samples
 
@@ -102,8 +114,12 @@ class LogParser:
         tmp = findall(r'Batch ([^ ]+) contains (\d+) B', log)
         sizes = {d: int(s) for d, s in tmp}
 
-        tmp = findall(r'Batch ([^ ]+) contains sample tx (\d+)', log)
-        samples = {int(s): d for d, s in tmp}
+        tmp = findall(r'\[(.*Z) .* Processed sample transaction (\d+) from (.*)', log)    ##
+        samples = {(int(s), c): self._to_posix(t) for t, s, c in tmp}
+
+        tmp = findall(r'\[(.*Z) .* Currency commit', log)   ##
+        currency_commit = [self._to_posix(t) for t in tmp]
+        assert(len(currency_commit) != 0)
 
         tmp = findall(r'.* WARN .* Timeout', log)
         timeouts = len(tmp)
@@ -138,7 +154,7 @@ class LogParser:
             }
         }
 
-        return proposals, commits, sizes, samples, timeouts, configs
+        return proposals, commits, sizes, samples, timeouts, configs, currency_commit
 
     def _to_posix(self, string):
         x = datetime.fromisoformat(string.replace('Z', '+00:00'))
@@ -161,21 +177,29 @@ class LogParser:
     def _end_to_end_throughput(self):
         if not self.commits:
             return 0, 0, 0
-        start, end = min(self.start), max(self.commits.values())
+        start, end = min(self.start), self.end  ##
+        
+        self.start_str = datetime.fromtimestamp(start).strftime('%d-%m-%Y %H:%M:%S') ##
+        self.end_str = datetime.fromtimestamp(end).strftime('%d-%m-%Y %H:%M:%S')
+
         duration = end - start
+        ## Sizes (batch sizes) are linked to core throughput, not end to end!
         bytes = sum(self.sizes.values())
         bps = bytes / duration
+        ## Should divide by size of a transaction instead of size of a block?
         tps = bps / self.size[0]
+
         return tps, bps, duration
 
-    def _end_to_end_latency(self):
+    def _end_to_end_latency(self):  ##
         latency = []
         for sent, received in zip(self.sent_samples, self.received_samples):
-            for tx_id, batch_id in received.items():
-                if batch_id in self.commits:
-                    assert tx_id in sent  # We receive txs that we sent.
-                    start = sent[tx_id]
-                    end = self.commits[batch_id]
+            ## For a given client/node pair
+            for (sample, client), ts in received.items():
+                ## Compute latency for transactions sent by this client
+                if (sample, client) in sent:
+                    start = sent[(sample, client)]
+                    end = ts
                     latency += [end-start]
         return mean(latency) if latency else 0
 
@@ -203,6 +227,8 @@ class LogParser:
             f' Committee size: {self.committee_size} nodes\n'
             f' Input rate: {sum(self.rate):,} tx/s\n'
             f' Transaction size: {self.size[0]:,} B\n'
+            f' Benchmark start: {self.start_str}\n'
+            f' Benchmark end:\t {self.end_str}\n'
             f' Execution time: {round(duration):,} s\n'
             '\n'
             f' Consensus timeout delay: {consensus_timeout_delay:,} ms\n'
@@ -221,6 +247,10 @@ class LogParser:
             f' End-to-end TPS: {round(end_to_end_tps):,} tx/s\n'
             f' End-to-end BPS: {round(end_to_end_bps):,} B/s\n'
             f' End-to-end latency: {round(end_to_end_latency):,} ms\n'
+            '\n'
+            ## Replace end_to_end_throughput with this?
+            f' Test max TPS: {round(max(self.committed_tx)/round(duration)):,} s\n'    ##
+            f' Test min TPS: {round(min(self.committed_tx)/round(duration)):,} s\n'    ##
             '-----------------------------------------\n'
         )
 

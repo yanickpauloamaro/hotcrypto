@@ -96,19 +96,19 @@ async fn run<'a>(matches: &ArgMatches<'_>) -> Result<()> {
     let key_file = matches.value_of("keys").unwrap();
     let register_file = matches.value_of("accounts").unwrap();
 
-    info!("Node address: {}", target);
-    info!("Transactions size: {} B", size);
-    info!("Transactions rate: {} tx/s", rate);
-
     let client = Client::new(
         target,
-        size,
+        // size,
         rate,
         timeout,
         nodes,
         key_file,
         register_file
     ).context("Failed to create client")?;
+    
+    info!("Node address: {}", target);
+    info!("Transactions size: {} B", client.transaction_size());
+    info!("Transactions rate: {} tx/s", rate);
 
     // Wait for all nodes to be online and synchronized.
     client.wait().await;
@@ -119,7 +119,7 @@ async fn run<'a>(matches: &ArgMatches<'_>) -> Result<()> {
 
 struct Client {
     target: SocketAddr,
-    size: usize,
+    // size: usize,
     rate: u64,
     timeout: u64,
     nodes: Vec<SocketAddr>,
@@ -135,7 +135,7 @@ impl Client {
 
     pub fn new(
         target: SocketAddr,
-        size: usize,
+        // size: usize,
         rate: u64,
         timeout: u64,
         nodes: Vec<SocketAddr>,
@@ -157,7 +157,7 @@ impl Client {
 
         Ok(Self{
             target,
-            size,
+            // size,
             rate,
             timeout,
             nodes,
@@ -232,6 +232,26 @@ impl Client {
             counter += 1;
         }
         Ok(())
+    }
+
+    fn transaction_size(&self) -> u64 {
+        let transaction = Transaction {
+            source: self.account,
+            dest: self.account,
+            amount: 0,
+            nonce: 0
+        };
+
+        let signature = Signature::new(&transaction.digest(), &self.secret_key);
+        let signed = SignedTransaction {
+            content: transaction,
+            signature
+        };
+
+        let size = bincode::serialized_size(&signed)
+            .expect("Failed to serialize signed transaction");
+            
+        return size;
     }
 
     pub async fn wait(&self) {

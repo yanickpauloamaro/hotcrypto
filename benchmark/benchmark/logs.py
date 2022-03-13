@@ -183,10 +183,10 @@ class LogParser:
         self.end_str = datetime.fromtimestamp(end).strftime('%d-%m-%Y %H:%M:%S')
 
         duration = end - start
-        ## Sizes (batch sizes) are linked to core throughput, not end to end!
+        ## Sizes (batch sizes) are linked to core throughput
+        ## Transactions in batches might not have been processed => not completely end to end
         bytes = sum(self.sizes.values())
         bps = bytes / duration
-        ## Should divide by size of a transaction instead of size of a block?
         tps = bps / self.size[0]
 
         return tps, bps, duration
@@ -249,8 +249,8 @@ class LogParser:
             f' End-to-end latency: {round(end_to_end_latency):,} ms\n'
             '\n'
             ## Replace end_to_end_throughput with this?
-            f' Test max TPS: {round(max(self.committed_tx)/round(duration)):,} s\n'    ##
-            f' Test min TPS: {round(min(self.committed_tx)/round(duration)):,} s\n'    ##
+            f' Currency max TPS: {round(max(self.committed_tx)/round(duration)):,} tx/s\n'    ##
+            f' Currency min TPS: {round(min(self.committed_tx)/round(duration)):,} tx/s\n'    ##
             '-----------------------------------------\n'
         )
 

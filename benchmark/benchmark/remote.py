@@ -117,7 +117,7 @@ class Bench:
         progress = progress_bar(public_ips, prefix='Uploading repo:')
         for _, host in enumerate(progress):
             c = Connection(host, user='ubuntu', connect_kwargs=self.connect)
-            c.put(f'../../{zip_name}.zip', '.')
+            c.put(f'{zip_name}.zip', '.')
 
         Print.info('Decompressing...')
         decompress = CommandMaker.decompress_repo(self.settings.repo_name)

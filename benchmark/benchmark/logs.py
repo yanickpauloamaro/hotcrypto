@@ -18,7 +18,7 @@ class LogParser:
         assert all(isinstance(x, list) for x in inputs)
         assert all(isinstance(x, str) for y in inputs for x in y)
         assert all(x for x in inputs)
-
+        self.begin = datetime.now()
         self.faults = faults
         if isinstance(faults, int):
             self.committee_size = len(nodes) + int(faults)
@@ -41,7 +41,7 @@ class LogParser:
                 results = p.map(self._parse_nodes, nodes)
         except (ValueError, IndexError) as e:
             raise ParseError(f'Failed to parse node logs: {e}')
-        proposals, commits, sizes, self.received_samples, timeouts, self.configs, currency_commits \
+        proposals, commits, sizes, self.received_samples, timeouts, self.configs, last_currency_commit, nb_currency_commits \
             = zip(*results)
         self.proposals = self._merge_results([x.items() for x in proposals])
         self.commits = self._merge_results([x.items() for x in commits])
@@ -50,17 +50,8 @@ class LogParser:
         }
         self.timeouts = max(timeouts)
 
-        self.end = None
-        self.committed_tx = []
-        
-        ## c = transactions committed by a given client
-        for c in currency_commits:
-            self.committed_tx += [len(c)]
-
-            ## Find timestamp of last transaction to be committed
-            max_ts = max(c)
-            if self.end is None or max_ts > self.end:
-                self.end = max_ts
+        self.end = max(last_currency_commit)
+        self.committed_tx = nb_currency_commits
 
         # Check whether clients missed their target rate.
         if self.misses != 0:
@@ -119,7 +110,18 @@ class LogParser:
 
         tmp = findall(r'\[(.*Z) .* Currency commit', log)   ##
         currency_commit = [self._to_posix(t) for t in tmp]
-        assert(len(currency_commit) != 0)
+        ## TODO Remove
+        
+        tmp = findall(r'\[(.*Z) .* Currency processed (\d+) transactions', log)   ##
+        ## TODO total tx processed
+        
+        last_currency_commit = datetime.timestamp(self.begin)
+        nb_currency_commits = 0
+
+        if len(currency_commit) > 0:
+            last_currency_commit = max(currency_commit)
+            nb_currency_commits = len(currency_commit)
+
 
         tmp = findall(r'.* WARN .* Timeout', log)
         timeouts = len(tmp)
@@ -154,7 +156,7 @@ class LogParser:
             }
         }
 
-        return proposals, commits, sizes, samples, timeouts, configs, currency_commit
+        return proposals, commits, sizes, samples, timeouts, configs, last_currency_commit, nb_currency_commits
 
     def _to_posix(self, string):
         x = datetime.fromisoformat(string.replace('Z', '+00:00'))

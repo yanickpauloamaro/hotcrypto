@@ -190,9 +190,13 @@ impl Node {
                     }
 
                     for digest in &block.payload {
-                        let serialized = self.store_read(digest)
+                        // let serialized = self.store_read(digest)
+                        //     .await
+                        //     .expect("Failed to get object from storage");
+                        let serialized = self.store.read(digest.to_vec())
                             .await
-                            .expect("Failed to get object from storage");
+                            .expect("Failed to get object from storage")
+                            .unwrap();
 
                         info!("Deserializing stored batch...");
                         let mempool_message = bincode::deserialize(&serialized)
@@ -200,6 +204,8 @@ impl Node {
 
                         match mempool_message {
                             MempoolMessage::Batch(batch) => {
+                                let batch_size = batch.len();
+
                                 for tx_vec in batch {
                                     let SignedTransaction{content: tx, signature} = SignedTransaction::from_vec(tx_vec);
 
@@ -216,10 +222,11 @@ impl Node {
                                             // NOTE: This log entry is used to compute performance.
                                             info!("Processed sample transaction {} from {:?}", tx.nonce, tx.source);
                                         }
-                                        // NOTE: This log entry is used to compute performance.
-                                        info!("Currency commit");
                                     }
                                 }
+
+                                // NOTE: This log entry is used to compute performance.
+                                info!("Currency processed {} transactions", batch_size);
                             },
                             MempoolMessage::BatchRequest(_, _) => {
                                 warn!("A batch request was stored!");

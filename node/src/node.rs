@@ -117,22 +117,6 @@ impl Node {
         Secret::new().write(filename)
     }
 
-    async fn store_read(&mut self, hash: &Digest) -> Option<Vec<u8>> {
-        let duration_ms = 100;
-
-        let timer = sleep(Duration::from_millis(duration_ms));
-        tokio::pin!(timer);
-        tokio::select!{
-            res = self.store.read(hash.to_vec()) => {
-                return res.unwrap_or(None);
-            },
-            () = &mut timer => {
-                warn!("Store took more than {} to respond!", duration_ms);
-                return None;
-            }
-        }
-    }
-
     fn get_balance(&self, account: &Account) -> Currency {
         return self.accounts.get(&account).unwrap_or(&CONST_INITIAL_BALANCE).clone();
     }
@@ -150,7 +134,7 @@ impl Node {
     fn verify<M>(&self, msg: &M, source: &Account, signature: &Signature) -> bool
         where M: Digestable, M: Nonceable
     {
-        info!("Verifiying transaction/request from {}", source);
+        info!("Verifiying transaction/request {} from {}", msg.get_nonce(), source);
         let signature_check = signature.verify(&msg.digest(), source).is_ok();
         let nonce_check = msg.get_nonce() == self.get_nonce(source);
 
@@ -190,17 +174,13 @@ impl Node {
                 },
                 Some(block) = self.commit.recv() => {
                     // Verify transaction signatures and update accounts for each transaction
-                    if !block.payload.is_empty() {
-                        debug!("Received block!");
-                    }
-
                     let mut nb_tx = 0;
 
                     for digest in &block.payload {
                         let serialized = self.store.read(digest.to_vec())
                             .await
-                            .expect("Failed to get object from storage")
-                            .unwrap();
+                            .expect("Failed to get batch from storage")
+                            .expect("Batch was not in storage");
 
                         info!("Deserializing stored batch...");
                         let mempool_message = bincode::deserialize(&serialized)
@@ -215,18 +195,14 @@ impl Node {
                                     let SignedTransaction{content: tx, signature} = SignedTransaction::from_vec(tx_vec);
 
                                     if self.verify(&tx, &tx.source, &signature) {
-                                        info!("Transaction is valid");
                                         self.increment_nonce(&tx.source);
                                         self.transfer(tx.source, tx.dest, tx.amount);
                                     }
 
                                     #[cfg(feature = "benchmark")]
-                                    {
-                                        if tx.amount == 2 {
-                                            // ##TODO check that feature=benchmark works
-                                            // NOTE: This log entry is used to compute performance.
-                                            info!("Processed sample transaction {} from {:?}", tx.nonce, tx.source);
-                                        }
+                                    if tx.amount == 2 {
+                                        // NOTE: This log entry is used to compute performance.
+                                        info!("Processed sample transaction {} from {:?}", tx.nonce, tx.source);
                                     }
                                 }
                                 

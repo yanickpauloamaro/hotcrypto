@@ -1,3 +1,4 @@
+#![allow(unused)]
 use crate::config::Export as _;
 use crate::config::{Committee, ConfigError, Parameters, Secret};
 use crate::currency::{Account, Nonceable, Nonce, SignedRequest, Currency, SignedTransaction, CONST_INITIAL_BALANCE};
@@ -127,14 +128,14 @@ impl Node {
 
     fn increment_nonce(&mut self, account: &Account) {
         let nonce = self.nonces.entry(*account).or_insert(0);
-        info!("Incrementing nonce for {0}: {1} -> {2}", account, *nonce, 1+*nonce);
+        // info!("Incrementing nonce for {0}: {1} -> {2}", account, *nonce, 1+*nonce);
         *nonce += 1;
     }
 
     fn verify<M>(&self, msg: &M, source: &Account, signature: &Signature) -> bool
         where M: Digestable, M: Nonceable
     {
-        info!("Verifiying transaction/request {} from {}", msg.get_nonce(), source);
+        // info!("Verifiying transaction/request {} from {}", msg.get_nonce(), source);
         let signature_check = signature.verify(&msg.digest(), source).is_ok();
         let nonce_check = msg.get_nonce() == self.get_nonce(source);
 
@@ -148,8 +149,8 @@ impl Node {
         if source_balance >= amount {
             self.accounts.insert(source, source_balance - amount);
             self.accounts.insert(dest, dest_balance + amount);
-            info!("Transfered {} from {} to {}... ", amount, source, dest);
-            info!("Resulting balance for {} is {}$:", source, source_balance - amount);
+            // info!("Transfered {} from {} to {}... ", amount, source, dest);
+            // info!("Resulting balance for {} is {}$:", source, source_balance - amount);
         }
     }
 
@@ -158,13 +159,13 @@ impl Node {
         loop {
             tokio::select! {
                 Some((request, tx_response)) = self.request.recv() => {
-                    info!("Received request from {}", request.request.source);
+                    // info!("Received request from {}", request.request.source);
 
                     // Verify request signature and send response
                     let SignedRequest{request, signature} = request;
 
                     if self.verify(&request, &request.source, &signature) {
-                        info!("Request is valid");
+                        // info!("Request is valid");
                         self.increment_nonce(&request.source);
 
                         // There is only one type of request for now

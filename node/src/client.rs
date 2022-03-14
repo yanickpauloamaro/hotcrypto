@@ -1,3 +1,4 @@
+#![allow(unused)]
 mod currency;
 mod node;
 mod config;
@@ -250,7 +251,7 @@ impl Client {
 
         let size = bincode::serialized_size(&signed)
             .expect("Failed to serialize signed transaction");
-            
+
         return size;
     }
 

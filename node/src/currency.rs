@@ -1,3 +1,4 @@
+#![allow(unused)]
 use crate::config::Export;
 
 use crypto::{PublicKey, Signature, Hash as Digestable, Digest};

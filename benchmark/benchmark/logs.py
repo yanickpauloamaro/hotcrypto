@@ -119,8 +119,7 @@ class LogParser:
             last_currency_commit = max(ts.values())
             total_nb_tx = sum(nb_tx.values())
 
-
-        tmp = findall(r'.* WARN .* Timeout', log)
+        tmp = findall(r'\[.* WARN .* Timeout', log)
         timeouts = len(tmp)
 
         configs = {

@@ -53,7 +53,7 @@ class Bench:
 
     def install(self):
 
-        Print.info('Installing rust and cloning the repo...')
+        Print.info('Installing rust and decompressing the repo...')
         cmd = [
             'sudo apt-get update',
             'sudo apt-get -y upgrade',
@@ -91,6 +91,21 @@ class Bench:
         except (GroupException, ExecutionError) as e:
             e = FabricError(e) if isinstance(e, GroupException) else e
             raise BenchError('Failed to install repo on testbed', e)
+
+    def remove(self):
+        hosts = self.manager.hosts(flat=True)
+        filename = self.settings.repo_name
+
+        try:
+            cmd = f'{CommandMaker.remove_repo(filename)} || true'
+
+            # Using public IP to connect to the instances
+            public_ips = [x.public for x in hosts]
+            g = Group(*public_ips, user='ubuntu', connect_kwargs=self.connect)
+            g.run(cmd, hide=True)
+
+        except GroupException as e:
+            raise BenchError('Failed to kill nodes', FabricError(e))
 
     def kill(self, hosts=[], delete_logs=False):
         assert isinstance(hosts, list)
@@ -156,7 +171,7 @@ class Bench:
         # Using public IP to connect to the instances
         public_ips = [x.public for x in hosts]
 
-        ## Reupload code
+        ## Reupload code (Only ned to reupload if there was any changes to rust code)
         self._upload(public_ips)
 
         ## Recompile code

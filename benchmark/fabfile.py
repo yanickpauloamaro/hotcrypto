@@ -164,3 +164,11 @@ def logs(ctx):
         print(LogParser.process('./logs', faults='?').result())
     except ParseError as e:
         Print.error(BenchError('Failed to parse logs', e))
+
+@task
+def remove(ctx):
+    ''' Remove repo from all machines '''
+    try:
+        Bench(ctx).remove()
+    except BenchError as e:
+        Print.error(e)

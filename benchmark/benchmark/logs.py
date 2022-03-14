@@ -51,6 +51,8 @@ class LogParser:
         self.timeouts = max(timeouts)
 
         self.currency_commits = self._merge_currency_results([x.items() for x in currency_commits])
+        # for x in self.currency_commits.items():
+        #     print(x)
 
         # Check whether clients missed their target rate.
         if self.misses != 0:

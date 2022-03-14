@@ -18,6 +18,10 @@ use tokio::time::{sleep, Duration};
 use tokio::sync::oneshot;
 use futures::sink::SinkExt as _;
 use crypto::{Signature, Hash as Digestable};
+#[cfg(feature = "benchmark")]
+use ed25519_dalek::{Digest as _, Sha512};
+#[cfg(feature = "benchmark")]
+use std::convert::TryInto as _;
 
 /// The default channel capacity for this module.
 pub const CHANNEL_CAPACITY: usize = 1_000;
@@ -161,6 +165,7 @@ impl Node {
             self.accounts.insert(source, source_balance - amount);
             self.accounts.insert(dest, dest_balance + amount);
             info!("Transfered {} from {} to {}... ", amount, source, dest);
+            info!("Resulting balance for {} is {}$:", source, source_balance - amount);
         }
     }
 
@@ -189,10 +194,9 @@ impl Node {
                         debug!("Received block!");
                     }
 
+                    let mut nb_tx = 0;
+
                     for digest in &block.payload {
-                        // let serialized = self.store_read(digest)
-                        //     .await
-                        //     .expect("Failed to get object from storage");
                         let serialized = self.store.read(digest.to_vec())
                             .await
                             .expect("Failed to get object from storage")
@@ -204,6 +208,7 @@ impl Node {
 
                         match mempool_message {
                             MempoolMessage::Batch(batch) => {
+
                                 let batch_size = batch.len();
 
                                 for tx_vec in batch {
@@ -224,13 +229,25 @@ impl Node {
                                         }
                                     }
                                 }
-
-                                // NOTE: This log entry is used to compute performance.
-                                info!("Currency processed {} transactions", batch_size);
+                                
+                                // NOTE: This is used to compute performance.
+                                nb_tx += batch_size;
                             },
                             MempoolMessage::BatchRequest(_, _) => {
                                 warn!("A batch request was stored!");
                             }
+                        }
+
+                        #[cfg(feature = "benchmark")]
+                        {
+                            // NOTE: This is one extra hash that is only needed to print the following log entries.
+                            let digest = Digest(
+                                Sha512::digest(&serialized).as_slice()[..32]
+                                    .try_into()
+                                    .unwrap(),
+                            );
+                            // NOTE: This log entry is used to compute performance.
+                            info!("Batch {:?} contains {} currency tx", digest, nb_tx);
                         }
                     }
                 }

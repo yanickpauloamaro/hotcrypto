@@ -41,7 +41,7 @@ class LogParser:
                 results = p.map(self._parse_nodes, nodes)
         except (ValueError, IndexError) as e:
             raise ParseError(f'Failed to parse node logs: {e}')
-        proposals, commits, sizes, self.received_samples, timeouts, self.configs, last_currency_commit, nb_currency_commits \
+        proposals, commits, sizes, self.received_samples, timeouts, self.configs, last_currency_commit, total_nb_tx \
             = zip(*results)
         self.proposals = self._merge_results([x.items() for x in proposals])
         self.commits = self._merge_results([x.items() for x in commits])
@@ -51,7 +51,7 @@ class LogParser:
         self.timeouts = max(timeouts)
 
         self.end = max(last_currency_commit)
-        self.committed_tx = nb_currency_commits
+        self.committed_tx = total_nb_tx
 
         # Check whether clients missed their target rate.
         if self.misses != 0:
@@ -107,20 +107,17 @@ class LogParser:
 
         tmp = findall(r'\[(.*Z) .* Processed sample transaction (\d+) from (.*)', log)    ##
         samples = {(int(s), c): self._to_posix(t) for t, s, c in tmp}
-
-        tmp = findall(r'\[(.*Z) .* Currency commit', log)   ##
-        currency_commit = [self._to_posix(t) for t in tmp]
-        ## TODO Remove
         
-        tmp = findall(r'\[(.*Z) .* Currency processed (\d+) transactions', log)   ##
-        ## TODO total tx processed
+        tmp = findall(r'\[(.*Z) .* Batch ([^ ]+) contains (\d+) currency tx', log)   ##
+        nb_tx = {d: int(s) for ts, d, s in tmp}
+        ts = {d: self._to_posix(ts) for ts, d, s in tmp}
         
         last_currency_commit = datetime.timestamp(self.begin)
-        nb_currency_commits = 0
+        total_nb_tx = 0
 
-        if len(currency_commit) > 0:
-            last_currency_commit = max(currency_commit)
-            nb_currency_commits = len(currency_commit)
+        if len(ts) > 0:
+            last_currency_commit = max(ts.values())
+            total_nb_tx = sum(nb_tx.values())
 
 
         tmp = findall(r'.* WARN .* Timeout', log)
@@ -156,7 +153,7 @@ class LogParser:
             }
         }
 
-        return proposals, commits, sizes, samples, timeouts, configs, last_currency_commit, nb_currency_commits
+        return proposals, commits, sizes, samples, timeouts, configs, last_currency_commit, total_nb_tx
 
     def _to_posix(self, string):
         x = datetime.fromisoformat(string.replace('Z', '+00:00'))

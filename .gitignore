@@ -3,6 +3,7 @@
 .db*
 db_*
 *.json
+!benchmark/settings.json
 *.log
 
 benchmark/client

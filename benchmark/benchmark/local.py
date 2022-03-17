@@ -34,7 +34,7 @@ class LocalBench:
         except subprocess.SubprocessError as e:
             raise BenchError('Failed to kill testbed', e)
 
-    def run(self, debug=False):
+    def run(self, debug=False, parallel=False):
         assert isinstance(debug, bool)
         Print.heading('Starting local benchmark')
 
@@ -51,7 +51,7 @@ class LocalBench:
             sleep(0.5)  # Removing the store may take time.
 
             # Recompile the latest code.
-            cmd = CommandMaker.compile().split()
+            cmd = CommandMaker.compile(parallel).split()
             subprocess.run(cmd, check=True, cwd=PathMaker.node_crate_path())
 
             # Create alias for the client and nodes binary.

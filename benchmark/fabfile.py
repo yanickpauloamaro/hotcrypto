@@ -8,7 +8,7 @@ from benchmark.instance import InstanceManager
 from benchmark.remote import Bench, BenchError
 
 @task
-def local(ctx):
+def local(ctx, parallel=0):
     ''' Run benchmarks on localhost '''
     bench_params = {
         'faults': 0,
@@ -31,7 +31,9 @@ def local(ctx):
         }
     }
     try:
-        ret = LocalBench(bench_params, node_params).run(debug=False).result()
+        if parallel:
+            print("Parallel benchmark")
+        ret = LocalBench(bench_params, node_params).run(debug=False, parallel=parallel).result()
         print(ret)
     except BenchError as e:
         Print.error(e)

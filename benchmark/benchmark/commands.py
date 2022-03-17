@@ -16,8 +16,9 @@ class CommandMaker:
         return f'rm -r {PathMaker.logs_path()} ; mkdir -p {PathMaker.logs_path()}'
 
     @staticmethod
-    def compile():
-        return 'cargo build --quiet --release --features benchmark'
+    def compile(parallel=False):
+        str = ',parallel' if parallel else ''
+        return f'cargo build --quiet --release --features benchmark{str}'
 
     @staticmethod
     def generate_key(filename, bin='node'):

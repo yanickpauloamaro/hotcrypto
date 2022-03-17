@@ -1,11 +1,10 @@
-#![allow(unused)]
 use crate::config::Export as _;
 use crate::config::{Committee, ConfigError, Parameters, Secret};
-use crate::currency::{Account, Nonceable, Nonce, SignedRequest, Currency, SignedTransaction, CONST_INITIAL_BALANCE};
+use crate::currency::*;
 
 use consensus::{Block, Consensus};
 use crypto::{SignatureService, Digest};
-use log::{info, debug, warn};
+use log::{info, warn};
 use mempool::{MempoolMessage, Mempool};
 use store::Store;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
@@ -15,7 +14,6 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use std::error::Error;
 use std::collections::HashMap;
-use tokio::time::{sleep, Duration};
 use tokio::sync::oneshot;
 use futures::sink::SinkExt as _;
 use crypto::{Signature, Hash as Digestable};
@@ -23,6 +21,11 @@ use crypto::{Signature, Hash as Digestable};
 use ed25519_dalek::{Digest as _, Sha512};
 #[cfg(feature = "benchmark")]
 use std::convert::TryInto as _;
+use store::StoreCommand;
+#[cfg(feature = "parallel")]
+use futures::future::join_all;
+#[cfg(feature = "parallel")]
+use rayon::prelude::*;
 
 /// The default channel capacity for this module.
 pub const CHANNEL_CAPACITY: usize = 1_000;
@@ -154,8 +157,83 @@ impl Node {
         }
     }
 
+    async fn verify_batch(&self, store: Sender<StoreCommand>, key: &Digest) -> Vec<Transaction> {
+
+        let (sender, receiver) = oneshot::channel();
+
+        if let Err(e) = store.send(StoreCommand::Read(key.to_vec(), sender)).await {
+            panic!("Failed to send Read command to store: {}", e);
+        }
+        let serialized = receiver
+            .await
+            .expect("Failed to receive reply to Read command from store")
+            .expect("Failed to get batch from storage")
+            .expect("Batch was not in storage");
+
+        info!("Deserializing stored batch...");
+        let mempool_message = bincode::deserialize(&serialized)
+            .expect("Failed to deserialize batch");
+
+        match mempool_message {
+            MempoolMessage::Batch(batch) => {
+
+                #[cfg(feature = "parallel")]
+                let iter: rayon::slice::Iter<Vec<u8>> = batch.par_iter();
+                
+                #[cfg(not(feature = "parallel"))]
+                let iter: std::slice::Iter<Vec<u8>> = batch.iter();
+                
+                let verified_batch: Vec<Transaction> = iter
+                    .filter_map(|tx_vec| {
+                        let SignedTransaction{content: tx, signature} = SignedTransaction::from_vec(tx_vec);
+                        if self.verify(&tx, &tx.source, &signature) {
+                            Some(tx)
+                        } else {
+                            None
+                        }
+                    }).collect();
+
+                return verified_batch;
+            },
+            MempoolMessage::BatchRequest(_, _) => {
+                warn!("A batch request was stored!");
+                return Vec::new();
+            }
+        }
+    }
+
+    async fn verify_block(&self, block: &Block) -> Vec<Vec<Transaction>> {
+        
+        let store = self.store.command_channel();
+
+        let mut verified_block = Vec::with_capacity(block.payload.len());
+
+        #[cfg(feature = "parallel")] {
+            block.payload.par_iter().map(|digest| {
+                return self.verify_batch(store.clone(), digest);
+            }).collect_into_vec(&mut verified_block);
+
+            return join_all(verified_block).await;
+        }
+
+        #[cfg(not(feature = "parallel"))] {
+            for digest in &block.payload {
+                verified_block.push(self.verify_batch(store.clone(), &digest).await);
+            }
+
+            return verified_block;
+        }
+    }
+
     pub async fn analyze_block(&mut self) {
         info!("Starting analyze loop");
+
+        #[cfg(feature = "parallel")]
+        info!("Transaction signatures will be checked in parallel");
+
+        #[cfg(not(feature = "parallel"))]
+        info!("Transaction signatures will be checked sequentially");
+
         loop {
             tokio::select! {
                 Some((request, tx_response)) = self.request.recv() => {
@@ -174,44 +252,19 @@ impl Node {
                     }
                 },
                 Some(block) = self.commit.recv() => {
-                    // Verify transaction signatures and update accounts for each transaction
-                    let mut nb_tx = 0;
+                    
+                    let verified_block = self.verify_block(&block).await;
+                    let zipped = block.payload.iter().zip(verified_block);
+                    
+                    for (_digest, batch) in zipped {
+                        for tx in &batch {
+                            self.increment_nonce(&tx.source);
+                            self.transfer(tx.source, tx.dest, tx.amount);
 
-                    for digest in &block.payload {
-                        let serialized = self.store.read(digest.to_vec())
-                            .await
-                            .expect("Failed to get batch from storage")
-                            .expect("Batch was not in storage");
-
-                        info!("Deserializing stored batch...");
-                        let mempool_message = bincode::deserialize(&serialized)
-                            .expect("Failed to deserialize batch");
-
-                        match mempool_message {
-                            MempoolMessage::Batch(batch) => {
-
-                                let batch_size = batch.len();
-
-                                for tx_vec in batch {
-                                    let SignedTransaction{content: tx, signature} = SignedTransaction::from_vec(tx_vec);
-
-                                    if self.verify(&tx, &tx.source, &signature) {
-                                        self.increment_nonce(&tx.source);
-                                        self.transfer(tx.source, tx.dest, tx.amount);
-                                    }
-
-                                    #[cfg(feature = "benchmark")]
-                                    if tx.amount == 2 {
-                                        // NOTE: This log entry is used to compute performance.
-                                        info!("Processed sample transaction {} from {:?}", tx.nonce, tx.source);
-                                    }
-                                }
-                                
-                                // NOTE: This is used to compute performance.
-                                nb_tx += batch_size;
-                            },
-                            MempoolMessage::BatchRequest(_, _) => {
-                                warn!("A batch request was stored!");
+                            #[cfg(feature = "benchmark")]
+                            if tx.amount == SAMPLE_TX_AMOUNT {
+                                // NOTE: This log entry is used to compute performance.
+                                info!("Processed sample transaction {} from {:?}", tx.nonce, tx.source);
                             }
                         }
 
@@ -219,12 +272,12 @@ impl Node {
                         {
                             // NOTE: This is one extra hash that is only needed to print the following log entries.
                             let digest = Digest(
-                                Sha512::digest(&serialized).as_slice()[..32]
+                                Sha512::digest(&_digest.to_vec()).as_slice()[..32]
                                     .try_into()
                                     .unwrap(),
                             );
                             // NOTE: This log entry is used to compute performance.
-                            info!("Batch {:?} contains {} currency tx", digest, nb_tx);
+                            info!("Batch {:?} contains {} currency tx", digest, batch.len());
                         }
                     }
                 }

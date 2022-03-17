@@ -77,6 +77,10 @@ impl Store {
             .expect("Failed to receive reply to Read command from store")
     }
 
+    pub fn command_channel(&self) -> Sender<StoreCommand> {
+        return self.channel.clone();
+    }
+
     pub async fn notify_read(&mut self, key: Key) -> StoreResult<Value> {
         let (sender, receiver) = oneshot::channel();
         if let Err(e) = self

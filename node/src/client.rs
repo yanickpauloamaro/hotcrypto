@@ -20,7 +20,7 @@ use tokio::net::TcpStream;
 use tokio::time::{interval, sleep, Duration, Instant};
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
 
-use currency::{SignedTransaction, Transaction, Account, Register};
+use currency::{SignedTransaction, Transaction, Account, Register, SAMPLE_TX_AMOUNT};
 use crypto::{SecretKey, Signature, Hash as Digestable};
 use rand::seq::SliceRandom;
 use bytes::Bytes;
@@ -199,7 +199,7 @@ impl Client {
                 if x == counter % burst {
                     // NOTE: This log entry is used to compute performance.
                     info!("Sending sample transaction {} from {:?}", nonce, self.account);
-                    amount = 2; // This amount identifies sample transactions
+                    amount = SAMPLE_TX_AMOUNT; // This amount identifies sample transactions
                 };
 
                 let dest = *self.register.accounts.choose(&mut r).unwrap();

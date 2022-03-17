@@ -11,6 +11,7 @@ use std::convert::TryInto;
 
 pub type Currency = u64;
 pub const CONST_INITIAL_BALANCE: Currency = 100;
+pub const SAMPLE_TX_AMOUNT: Currency = 2;
 
 pub type Account = PublicKey;
 
@@ -131,7 +132,7 @@ impl SignedTransaction {
         return tx;
     }
 
-    pub fn from_vec(vec: Vec<u8>) -> SignedTransaction {
+    pub fn from_vec(vec: &Vec<u8>) -> SignedTransaction {
         
         let tx = bincode::deserialize(&vec)
             .expect("Failed to deserialize a transaction");

@@ -41,7 +41,7 @@ class LogParser:
                 results = p.map(self._parse_nodes, nodes)
         except (ValueError, IndexError) as e:
             raise ParseError(f'Failed to parse node logs: {e}')
-        proposals, commits, sizes, self.received_samples, timeouts, self.configs, currency_commits \
+        proposals, commits, sizes, self.received_samples, timeouts, self.configs, currency_commits, parallel \
             = zip(*results)
         self.proposals = self._merge_results([x.items() for x in proposals])
         self.commits = self._merge_results([x.items() for x in commits])
@@ -51,8 +51,7 @@ class LogParser:
         self.timeouts = max(timeouts)
 
         self.currency_commits = self._merge_currency_results([x.items() for x in currency_commits])
-        # for x in self.currency_commits.items():
-        #     print(x)
+        self.parallel = True in parallel
 
         # Check whether clients missed their target rate.
         if self.misses != 0:
@@ -122,6 +121,9 @@ class LogParser:
         tmp = [(d, (self._to_posix(ts), int(s))) for ts, d, s in tmp]
         currency_commits = self._merge_currency_results([tmp])
 
+        tmp = findall(r'\[.* checked in parallel', log)
+        parallel = len(tmp) > 0
+
         tmp = findall(r'\[.* WARN .* Timeout', log)
         timeouts = len(tmp)
 
@@ -155,7 +157,7 @@ class LogParser:
             }
         }
 
-        return proposals, commits, sizes, samples, timeouts, configs, currency_commits
+        return proposals, commits, sizes, samples, timeouts, configs, currency_commits, parallel
 
     def _to_posix(self, string):
         x = datetime.fromisoformat(string.replace('Z', '+00:00'))
@@ -225,10 +227,12 @@ class LogParser:
         mempool_batch_size = self.configs[0]['mempool']['batch_size']
         mempool_max_batch_delay = self.configs[0]['mempool']['max_batch_delay']
 
+        parallel = ' Parallel processing' if self.parallel else ''
+
         return (
             '\n'
             '-----------------------------------------\n'
-            ' SUMMARY:\n'
+            f' SUMMARY:{parallel}\n'
             '-----------------------------------------\n'
             ' + CONFIG:\n'
             f' Faults: {self.faults} nodes\n'

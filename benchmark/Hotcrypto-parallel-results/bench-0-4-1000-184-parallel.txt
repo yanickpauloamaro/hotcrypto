@@ -1,0 +1,102 @@
+
+-----------------------------------------
+ SUMMARY: Parallel processing
+-----------------------------------------
+ + CONFIG:
+ Faults: 0 nodes
+ Committee size: 4 nodes
+ Input rate: 1,000 tx/s
+ Transaction size: 184 B
+ Benchmark start: 18-03-2022 21:52:19
+ Benchmark end:	 18-03-2022 21:57:21
+ Execution time: 302 s
+
+ Consensus timeout delay: 5,000 ms
+ Consensus sync retry delay: 5,000 ms
+ Mempool GC depth: 50 rounds
+ Mempool sync retry delay: 5,000 ms
+ Mempool sync retry nodes: 3 nodes
+ Mempool batch size: 500,000 B
+ Mempool max batch delay: 100 ms
+
+ + RESULTS:
+ Consensus TPS: 960 tx/s
+ Consensus BPS: 176,652 B/s
+ Consensus latency: -15 ms
+
+ End-to-end TPS: 960 tx/s
+ End-to-end BPS: 176,639 B/s
+ End-to-end latency: 44 ms
+
+ Currency TPS: 0 tx/s
+ Currency BPS: 0 B/s
+ Currency latency: 44 ms
+-----------------------------------------
+
+-----------------------------------------
+ SUMMARY: Parallel processing
+-----------------------------------------
+ + CONFIG:
+ Faults: 0 nodes
+ Committee size: 4 nodes
+ Input rate: 1,000 tx/s
+ Transaction size: 184 B
+ Benchmark start: 18-03-2022 21:57:44
+ Benchmark end:	 18-03-2022 22:02:46
+ Execution time: 302 s
+
+ Consensus timeout delay: 5,000 ms
+ Consensus sync retry delay: 5,000 ms
+ Mempool GC depth: 50 rounds
+ Mempool sync retry delay: 5,000 ms
+ Mempool sync retry nodes: 3 nodes
+ Mempool batch size: 500,000 B
+ Mempool max batch delay: 100 ms
+
+ + RESULTS:
+ Consensus TPS: 960 tx/s
+ Consensus BPS: 176,648 B/s
+ Consensus latency: -14 ms
+
+ End-to-end TPS: 960 tx/s
+ End-to-end BPS: 176,633 B/s
+ End-to-end latency: 63 ms
+
+ Currency TPS: 0 tx/s
+ Currency BPS: 0 B/s
+ Currency latency: 63 ms
+-----------------------------------------
+
+-----------------------------------------
+ SUMMARY: Parallel processing
+-----------------------------------------
+ + CONFIG:
+ Faults: 0 nodes
+ Committee size: 4 nodes
+ Input rate: 1,000 tx/s
+ Transaction size: 184 B
+ Benchmark start: 18-03-2022 22:03:09
+ Benchmark end:	 18-03-2022 22:08:11
+ Execution time: 302 s
+
+ Consensus timeout delay: 5,000 ms
+ Consensus sync retry delay: 5,000 ms
+ Mempool GC depth: 50 rounds
+ Mempool sync retry delay: 5,000 ms
+ Mempool sync retry nodes: 3 nodes
+ Mempool batch size: 500,000 B
+ Mempool max batch delay: 100 ms
+
+ + RESULTS:
+ Consensus TPS: 960 tx/s
+ Consensus BPS: 176,665 B/s
+ Consensus latency: -18 ms
+
+ End-to-end TPS: 960 tx/s
+ End-to-end BPS: 176,648 B/s
+ End-to-end latency: 43 ms
+
+ Currency TPS: 0 tx/s
+ Currency BPS: 0 B/s
+ Currency latency: 43 ms
+-----------------------------------------

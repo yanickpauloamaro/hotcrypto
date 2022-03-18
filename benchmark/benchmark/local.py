@@ -34,7 +34,7 @@ class LocalBench:
         except subprocess.SubprocessError as e:
             raise BenchError('Failed to kill testbed', e)
 
-    def run(self, debug=False, parallel=False):
+    def run(self, debug=False, parallel=0):
         assert isinstance(debug, bool)
         Print.heading('Starting local benchmark')
 

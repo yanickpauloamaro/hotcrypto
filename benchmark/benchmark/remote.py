@@ -163,7 +163,7 @@ class Bench:
         output = c.run(cmd, hide=True)
         self._check_stderr(output)
 
-    def _update(self, hosts):
+    def _update(self, hosts, parallel=0):
         Print.info(
             f'Updating {len(hosts)} nodes...'
         )
@@ -178,7 +178,7 @@ class Bench:
         Print.info(f'Recompiling...')
         cmd = [
             'source $HOME/.cargo/env',
-            f'(cd {self.settings.repo_name}/node && {CommandMaker.compile()})',
+            f'(cd {self.settings.repo_name}/node && {CommandMaker.compile(parallel)})',
             CommandMaker.alias_binaries(
                 f'./{self.settings.repo_name}/target/release/'
             )
@@ -188,7 +188,7 @@ class Bench:
         g = Group(*public_ips, user='ubuntu', connect_kwargs=self.connect)
         g.run(' && '.join(cmd), hide=True)
 
-    def _config(self, hosts, node_parameters):
+    def _config(self, hosts, node_parameters, parallel=0):
         Print.info('Generating configuration files...')
 
         # Cleanup all local configuration files.
@@ -196,7 +196,7 @@ class Bench:
         subprocess.run([cmd], shell=True, stderr=subprocess.DEVNULL)
 
         # Recompile the latest code.
-        cmd = CommandMaker.compile().split()
+        cmd = CommandMaker.compile(parallel).split()
         subprocess.run(cmd, check=True, cwd=PathMaker.node_crate_path())
 
         # Create alias for the client and nodes binary.
@@ -324,7 +324,7 @@ class Bench:
         Print.info('Parsing logs and computing performance...')
         return LogParser.process(PathMaker.logs_path(), faults=faults)
 
-    def run(self, bench_parameters_dict, node_parameters_dict, debug=False):
+    def run(self, bench_parameters_dict, node_parameters_dict, debug=False, parallel=0):
         assert isinstance(debug, bool)
         Print.heading('Starting remote benchmark')
         try:
@@ -341,7 +341,7 @@ class Bench:
 
         # Update nodes.
         try:
-            self._update(selected_hosts)
+            self._update(selected_hosts, parallel)
         except (GroupException, ExecutionError) as e:
             e = FabricError(e) if isinstance(e, GroupException) else e
             raise BenchError('Failed to update nodes', e)
@@ -354,7 +354,7 @@ class Bench:
 
                 # Upload all configuration files.
                 try:
-                    self._config(hosts, node_parameters)
+                    self._config(hosts, node_parameters, parallel)
                 except (subprocess.SubprocessError, GroupException) as e:
                     e = FabricError(e) if isinstance(e, GroupException) else e
                     Print.error(BenchError('Failed to configure nodes', e))

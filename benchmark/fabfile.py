@@ -103,16 +103,16 @@ def install(ctx):
 
 
 @task
-def remote(ctx):
+def remote(ctx, parallel=0):
     ''' Run benchmarks on AWS (N nodes across all regions) '''
     bench_params = {
         'faults': 0,
         # 'tx_size': 512,
         'tx_size': 128,
-        'nodes': [4, 22],
+        'nodes': [4],
         'rate': [25_000],
         'duration': 300,
-        'runs': 3,
+        'runs': 1,
     }
 
     node_params = {
@@ -129,7 +129,9 @@ def remote(ctx):
         }
     }
     try:
-        Bench(ctx).run(bench_params, node_params, debug=False)
+        if parallel:
+            print("Parallel benchmark")
+        Bench(ctx).run(bench_params, node_params, debug=False, parallel=parallel)
     except BenchError as e:
         Print.error(e)
 

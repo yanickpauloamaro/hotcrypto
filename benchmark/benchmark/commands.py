@@ -69,7 +69,8 @@ class CommandMaker:
     def compress_repo(repo, zip_name):
         assert isinstance(repo, str)
         assert isinstance(zip_name, str)
-        return f'(cd .. && cd .. &&  zip -r {repo}/benchmark/{zip_name}.zip {repo} -q -x "**/target/*" -x "*/\db_*" -x "*/\.git*" -x "*/\.db-*" -x "*/\plots/*" -x "*/\results/*" -x "*/\data/*")'
+        return (f'(cd .. && cd .. &&  zip -r {repo}/benchmark/{zip_name}.zip {repo} -q '
+                '-x "**/target/*" -x "*/\db_*" -x "*/\.git*" -x "*/\.db-*" -x "*/\plots/*" -x "*/\results/*" -x "*/\data/*" -x "*/\logs/*")')
         # return f'zip -r ../../{zip_name}.zip ../../{repo} -q -x "**/target/*" -x "**/results/*" -x "**/plots/*" -x "**/.**"'
 
     @staticmethod

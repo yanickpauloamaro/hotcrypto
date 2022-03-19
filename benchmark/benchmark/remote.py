@@ -72,9 +72,7 @@ class Bench:
             'sudo apt-get install -y clang',
 
             # Clone the repo.
-            f'sudo apt-get install -y unzip',
-            f'unzip {self.settings.repo_name}.zip',
-            f'cd {self.settings.repo_name}'
+            f'sudo apt-get install -y unzip'
         ]
         hosts = self.manager.hosts(flat=True)
 
@@ -82,11 +80,12 @@ class Bench:
             ## Using public IP to connect to the instances
             public_ips = [x.public for x in hosts]
 
-            ## Send repo to the instances
-            self._upload(public_ips)
-
             g = Group(*public_ips, user='ubuntu', connect_kwargs=self.connect)
             g.run(' && '.join(cmd), hide=True)
+
+            ## Send repo to the instances
+            self._upload(public_ips, cd=True)
+
             Print.heading(f'Initialized testbed of {len(hosts)} nodes')
         except (GroupException, ExecutionError) as e:
             e = FabricError(e) if isinstance(e, GroupException) else e
@@ -121,7 +120,7 @@ class Bench:
         except GroupException as e:
             raise BenchError('Failed to kill nodes', FabricError(e))
 
-    def _upload(self, public_ips):
+    def _upload(self, public_ips, cd=False):
         Print.info('Compressing repo...')
         filename = self.settings.repo_name
         zip_name = self.settings.repo_name
@@ -139,6 +138,9 @@ class Bench:
         cmd = [
             f'(({decompress}) || true)'
         ]
+
+        if cd:
+            cmd += [f'cd {filename}']
 
         g = Group(*public_ips, user='ubuntu', connect_kwargs=self.connect)
         g.run(' && '.join(cmd), hide=True)

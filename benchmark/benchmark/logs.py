@@ -240,7 +240,7 @@ class LogParser:
             f' Input rate: {sum(self.rate):,} tx/s\n'
             f' Transaction size: {self.size[0]:,} B\n'
             f' Benchmark start: {self.start_str}\n'
-            f' Benchmark end:\t {self.end_str}\n'
+            f' Benchmark end:   {self.end_str}\n'
             f' Execution time: {round(duration):,} s\n'
             '\n'
             f' Consensus timeout delay: {consensus_timeout_delay:,} ms\n'

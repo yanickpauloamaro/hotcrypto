@@ -131,18 +131,19 @@ impl Node {
 
     fn increment_nonce(&mut self, account: &Account) {
         let nonce = self.nonces.entry(*account).or_insert(0);
-        // info!("Incrementing nonce for {0}: {1} -> {2}", account, *nonce, 1+*nonce);
         *nonce += 1;
     }
 
-    fn verify<M>(&self, msg: &M, source: &Account, signature: &Signature) -> bool
-        where M: Digestable, M: Nonceable
+    fn verify_nonce<M>(&self, msg: &M, source: &Account) -> bool
+        where M: Nonceable
     {
-        // info!("Verifiying transaction/request {} from {}", msg.get_nonce(), source);
-        let signature_check = signature.verify(&msg.digest(), source).is_ok();
-        let nonce_check = msg.get_nonce() == self.get_nonce(source);
+        return msg.get_nonce() == self.get_nonce(source);
+    }
 
-        return signature_check && nonce_check;
+    fn verify_signature<M>(&self, msg: &M, source: &Account, signature: &Signature) -> bool
+        where M: Digestable
+    {
+        return signature.verify(&msg.digest(), source).is_ok();
     }
 
     fn transfer(&mut self, source: Account, dest: Account, amount: Currency) {
@@ -186,7 +187,7 @@ impl Node {
                 let verified_batch: Vec<Transaction> = iter
                     .filter_map(|tx_vec| {
                         let SignedTransaction{content: tx, signature} = SignedTransaction::from_vec(tx_vec);
-                        if self.verify(&tx, &tx.source, &signature) {
+                        if self.verify_signature(&tx, &tx.source, &signature) {
                             Some(tx)
                         } else {
                             None
@@ -242,8 +243,9 @@ impl Node {
                     // Verify request signature and send response
                     let SignedRequest{request, signature} = request;
 
-                    if self.verify(&request, &request.source, &signature) {
-                        // info!("Request is valid");
+                    if self.verify_signature(&request, &request.source, &signature)
+                        && self.verify_nonce(&request, &request.source) {
+
                         self.increment_nonce(&request.source);
 
                         // There is only one type of request for now
@@ -258,13 +260,15 @@ impl Node {
                     
                     for (_digest, batch) in zipped {
                         for tx in &batch {
-                            self.increment_nonce(&tx.source);
-                            self.transfer(tx.source, tx.dest, tx.amount);
+                            if self.verify_nonce(tx, &tx.source) {
+                                self.increment_nonce(&tx.source);
+                                self.transfer(tx.source, tx.dest, tx.amount);
 
-                            #[cfg(feature = "benchmark")]
-                            if tx.amount == SAMPLE_TX_AMOUNT {
-                                // NOTE: This log entry is used to compute performance.
-                                info!("Processed sample transaction {} from {:?}", tx.nonce, tx.source);
+                                #[cfg(feature = "benchmark")]
+                                if tx.amount == SAMPLE_TX_AMOUNT {
+                                    // NOTE: This log entry is used to compute performance.
+                                    info!("Processed sample transaction {} from {:?}", tx.nonce, tx.source);
+                                }
                             }
                         }
 

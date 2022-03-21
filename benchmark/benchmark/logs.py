@@ -31,7 +31,7 @@ class LogParser:
                 results = p.map(self._parse_clients, clients)
         except (ValueError, IndexError) as e:
             raise ParseError(f'Failed to parse client logs: {e}')
-        self.size, self.rate, self.start, misses, self.sent_samples \
+        self.size, self.rate, self.start, misses, self.currency_sent_samples \
             = zip(*results)
         self.misses = sum(misses)
 
@@ -41,7 +41,7 @@ class LogParser:
                 results = p.map(self._parse_nodes, nodes)
         except (ValueError, IndexError) as e:
             raise ParseError(f'Failed to parse node logs: {e}')
-        proposals, commits, sizes, self.received_samples, timeouts, self.configs, currency_commits, parallel \
+        proposals, commits, sizes, timeouts, self.configs, self.currency_received_samples, currency_commits, parallel \
             = zip(*results)
         self.proposals = self._merge_results([x.items() for x in proposals])
         self.commits = self._merge_results([x.items() for x in commits])
@@ -95,9 +95,9 @@ class LogParser:
         misses = len(findall(r'rate too high', log))
 
         tmp = findall(r'\[(.*Z) .* Sending sample transaction (\d+) from (.*)', log)    ##
-        samples = {(int(s), c): self._to_posix(t) for t, s, c in tmp}
+        currency_samples = {(int(s), c): self._to_posix(t) for t, s, c in tmp}
 
-        return size, rate, start, misses, samples
+        return size, rate, start, misses, currency_samples
 
     def _parse_nodes(self, log):
         if search(r'panic', log) is not None:
@@ -111,11 +111,11 @@ class LogParser:
         tmp = [(d, self._to_posix(t)) for t, d in tmp]
         commits = self._merge_results([tmp])
 
-        tmp = findall(r'Batch ([^ ]+) contains (\d+) B', log)
+        tmp = findall(r'\[.* Batch ([^ ]+) contains (\d+) B', log)
         sizes = {d: int(s) for d, s in tmp}
 
         tmp = findall(r'\[(.*Z) .* Processed sample transaction (\d+) from (.*)', log)    ##
-        samples = {(int(s), c): self._to_posix(t) for t, s, c in tmp}
+        currency_samples = {(int(s), c): self._to_posix(t) for t, s, c in tmp}
         
         tmp = findall(r'\[(.*Z) .* Batch ([^ ]+) contains (\d+) currency tx', log)   ##
         tmp = [(d, (self._to_posix(ts), int(s))) for ts, d, s in tmp]
@@ -157,7 +157,7 @@ class LogParser:
             }
         }
 
-        return proposals, commits, sizes, samples, timeouts, configs, currency_commits, parallel
+        return proposals, commits, sizes, timeouts, configs, currency_samples, currency_commits, parallel
 
     def _to_posix(self, string):
         x = datetime.fromisoformat(string.replace('Z', '+00:00'))
@@ -177,30 +177,25 @@ class LogParser:
         latency = [c - self.proposals[d] for d, c in self.commits.items()]
         return mean(latency) if latency else 0
 
-    def _end_to_end_throughput(self):
+    def _currency_throughput(self): ##
         if not self.currency_commits:
             return 0, 0, 0
 
-        tmp = list(zip(*self.currency_commits.values()))    ##
-        start, end = min(self.start), max(tmp[0])  ##
+        tmp = list(zip(*self.currency_commits.values()))
+        start, end = min(self.start), max(tmp[0])
 
-        self.start_str = datetime.fromtimestamp(start).strftime('%d-%m-%Y %H:%M:%S') ##
-        self.end_str = datetime.fromtimestamp(end).strftime('%d-%m-%Y %H:%M:%S') ##
+        self.start_str = datetime.fromtimestamp(start).strftime('%d-%m-%Y %H:%M:%S')
+        self.end_str = datetime.fromtimestamp(end).strftime('%d-%m-%Y %H:%M:%S')
 
         duration = end - start
-        ## Sizes (batch sizes) are linked to core throughput
-        ## Transactions in batches might not have been processed by the node => not completely end-to-end
-        bytes = sum(self.sizes.values())
-        bps = bytes / duration
-        tps = bps / self.size[0]
-
-        self.committed_tx = sum(tmp[1])
+        tps = sum(tmp[1])/duration
+        bps = tps * self.size[0]
 
         return tps, bps, duration
 
-    def _end_to_end_latency(self):  ##
+    def _currency_latency(self):  ##
         latency = []
-        for sent, received in zip(self.sent_samples, self.received_samples):
+        for sent, received in zip(self.currency_sent_samples, self.currency_received_samples):
             ## For a given client/node pair
             for (sample, client), ts in received.items():
                 ## Compute latency for transactions sent by this client
@@ -213,11 +208,9 @@ class LogParser:
     def result(self):
         consensus_latency = self._consensus_latency() * 1000
         consensus_tps, consensus_bps, _ = self._consensus_throughput()
-        end_to_end_tps, end_to_end_bps, duration = self._end_to_end_throughput()
-        end_to_end_latency = self._end_to_end_latency() * 1000
 
-        currency_tps = round(self.committed_tx/round(duration))
-        currency_bps = currency_tps * self.size[0]
+        currency_tps, currency_bps, duration = self._currency_throughput()
+        currency_latency = self._currency_latency() * 1000
 
         consensus_timeout_delay = self.configs[0]['consensus']['timeout_delay']
         consensus_sync_retry_delay = self.configs[0]['consensus']['sync_retry_delay']
@@ -256,13 +249,9 @@ class LogParser:
             f' Consensus BPS: {round(consensus_bps):,} B/s\n'
             f' Consensus latency: {round(consensus_latency):,} ms\n'
             '\n'
-            f' End-to-end TPS: {round(end_to_end_tps):,} tx/s\n'
-            f' End-to-end BPS: {round(end_to_end_bps):,} B/s\n'
-            f' End-to-end latency: {round(end_to_end_latency):,} ms\n'
-            '\n'
-            f' Currency TPS: {currency_tps:,} tx/s\n'    ##
-            f' Currency BPS: {currency_bps:,} B/s\n'    ##
-            f' Currency latency: {round(end_to_end_latency):,} ms\n'
+            f' Currency TPS: {round(currency_tps):,} tx/s\n'    ##
+            f' Currency BPS: {round(currency_bps):,} B/s\n'    ##
+            f' Currency latency: {round(currency_latency):,} ms\n' ##
             '-----------------------------------------\n'
         )
 

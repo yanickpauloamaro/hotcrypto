@@ -77,8 +77,9 @@ class PathMaker:
         )
 
     @staticmethod
-    def plot_file(name, ext):
-        return join(PathMaker.plots_path(), f'{name}.{ext}')
+    def plot_file(name, ext, parallel=False):
+        str = 'parallel' if parallel else 'sequential'
+        return join(PathMaker.plots_path(), f'hotcrypto-{str}_{name}.{ext}')
 
 
 class Color:

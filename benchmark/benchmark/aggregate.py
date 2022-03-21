@@ -56,8 +56,8 @@ class Result:
 
     @classmethod
     def from_str(cls, raw):
-        tps = int(search(r'.* End-to-end TPS: (\d+)', raw).group(1))
-        latency = int(search(r'.* End-to-end latency: (\d+)', raw).group(1))
+        tps = int(search(r'.* Currency TPS: (\d+)', raw).group(1))
+        latency = int(search(r'.* Currency latency: (\d+)', raw).group(1))
         return cls(tps, latency)
 
     @classmethod
@@ -85,10 +85,15 @@ class LogAggregator:
                 data += f.read()
 
         records = defaultdict(list)
+        parallel = False
         for chunk in data.replace(',', '').split('SUMMARY')[1:]:
             if chunk:
                 records[Setup.from_str(chunk)] += [Result.from_str(chunk)]
+                x = search(r'.* Parallel processing', data)
+                if parallel or not x is None:
+                    parallel = True
 
+        self.parallel = parallel
         self.records = {k: Result.aggregate(v) for k, v in records.items()}
 
     def print(self):
@@ -98,6 +103,7 @@ class LogAggregator:
         results = [
             self._print_latency(), self._print_tps(), self._print_robustness()
         ]
+        parallel = ' Parallel processing' if self.parallel else ''
         for name, records in results:
             for setup, values in records.items():
                 data = '\n'.join(
@@ -106,7 +112,7 @@ class LogAggregator:
                 string = (
                     '\n'
                     '-----------------------------------------\n'
-                    ' RESULTS:\n'
+                    f' RESULTS:{parallel}\n'
                     '-----------------------------------------\n'
                     f'{setup}'
                     '\n'

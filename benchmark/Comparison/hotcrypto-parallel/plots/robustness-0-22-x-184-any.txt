@@ -1,6 +1,6 @@
 
 -----------------------------------------
- RESULTS:
+ RESULTS: Parallel processing
 -----------------------------------------
  Faults: 0 nodes
  Committee size: 22 nodes
@@ -9,14 +9,14 @@
  Max latency: any ms
 
  Variable value: X=1012
- TPS: 880 +/- 0 tx/s
+ TPS: 881 +/- 1 tx/s
  Latency: 59 +/- 0 ms
 
  Variable value: X=10010
- TPS: 9679 +/- 1 tx/s
- Latency: 68 +/- 3 ms
+ TPS: 9676 +/- 16 tx/s
+ Latency: 250 +/- 329 ms
 
  Variable value: X=25014
- TPS: 24606 +/- 8 tx/s
- Latency: 7201 +/- 2154 ms
+ TPS: 24649 +/- 5 tx/s
+ Latency: 62 +/- 1 ms
 -----------------------------------------

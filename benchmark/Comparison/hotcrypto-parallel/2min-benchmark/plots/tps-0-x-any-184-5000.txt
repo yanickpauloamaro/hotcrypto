@@ -1,0 +1,14 @@
+
+-----------------------------------------
+ RESULTS: Parallel processing
+-----------------------------------------
+ Faults: 0 nodes
+ Committee size: x nodes
+ Input rate: any tx/s
+ Transaction size: 184 B
+ Max latency: 5000 ms
+
+ Variable value: X=4
+ TPS: 24595 +/- 565 tx/s
+ Latency: 2430 +/- 1496 ms
+-----------------------------------------

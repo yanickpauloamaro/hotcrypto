@@ -217,6 +217,22 @@ impl Signature {
         }
         dalek::verify_batch(&messages[..], &signatures[..], &keys[..])
     }
+    
+    pub fn verify_many<'a, H, I>(digests: H, proofs: I) -> Result<(), CryptoError>
+    where
+        H: IntoIterator<Item = &'a Digest>,
+        I: IntoIterator<Item = &'a (PublicKey, Signature)>,
+    {
+        let mut messages: Vec<&[u8]> = Vec::new();
+        let mut signatures: Vec<dalek::Signature> = Vec::new();
+        let mut keys: Vec<dalek::PublicKey> = Vec::new();
+        for (msg, (key, sig)) in digests.into_iter().zip(proofs.into_iter()) {
+            messages.push(&msg.0[..]);
+            signatures.push(ed25519::signature::Signature::from_bytes(&sig.flatten())?);
+            keys.push(dalek::PublicKey::from_bytes(&key.0)?);
+        }
+        dalek::verify_batch(&messages[..], &signatures[..], &keys[..])
+    }
 }
 
 /// This service holds the node's private key. It takes digests as input and returns a signature

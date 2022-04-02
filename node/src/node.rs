@@ -22,13 +22,11 @@ use ed25519_dalek::{Digest as _, Sha512};
 #[cfg(feature = "benchmark")]
 use std::convert::TryInto as _;
 use store::StoreCommand;
-#[cfg(feature = "parallel")]
-use futures::future::join_all;
-#[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
 /// The default channel capacity for this module.
 pub const CHANNEL_CAPACITY: usize = 1_000;
+const BATCH_JOB_COUNT: usize = 3;
 
 pub struct Node {
     pub commit: Receiver<Block>,
@@ -158,6 +156,17 @@ impl Node {
         }
     }
 
+    fn verify_transactions(&self, transactions: Vec<Transaction>, proofs: Vec<(Account, Signature)>) -> Vec<Transaction> {
+        transactions.into_iter().zip(proofs.iter())
+            .filter_map(move |(tx, (key, signature))| {
+                if self.verify_signature(&tx, key, signature) {
+                    Some(tx)
+                } else {
+                    None
+                }
+            }).collect()
+    }
+
     async fn verify_batch(&self, store: Sender<StoreCommand>, key: &Digest) -> Vec<Transaction> {
 
         let (sender, receiver) = oneshot::channel();
@@ -177,20 +186,33 @@ impl Node {
 
         match mempool_message {
             MempoolMessage::Batch(batch) => {
+                if batch.len() == 0 {
+                    return Vec::new();
+                }
 
-                #[cfg(feature = "parallel")]
-                let iter: rayon::slice::Iter<Vec<u8>> = batch.par_iter();
-                
-                #[cfg(not(feature = "parallel"))]
-                let iter: std::slice::Iter<Vec<u8>> = batch.iter();
-                
-                let verified_batch: Vec<Transaction> = iter
-                    .filter_map(|tx_vec| {
-                        let SignedTransaction{content: tx, signature} = SignedTransaction::from_vec(tx_vec);
-                        if self.verify_signature(&tx, &tx.source, &signature) {
-                            Some(tx)
+                let chunk_size = (batch.len() / BATCH_JOB_COUNT) + (batch.len() % BATCH_JOB_COUNT != 0) as usize;
+
+                let jobs: rayon::slice::Chunks<Vec<u8>> = batch.par_chunks(chunk_size);
+
+                let verified_batch: Vec<Transaction> = jobs
+                    .flat_map(|job| {
+                        let job_size = job.len();
+                        let mut transactions = Vec::with_capacity(job_size);
+                        let mut digests = Vec::with_capacity(job_size);
+                        let mut proofs = Vec::with_capacity(job_size);
+
+                        for tx_vec in job {
+                            let SignedTransaction{content: tx, signature} = SignedTransaction::from_vec(tx_vec);
+                            proofs.push((tx.source, signature));
+                            digests.push(tx.digest());
+                            transactions.push(tx);
+                        }
+
+                        if Signature::verify_many(&digests, &proofs).is_ok() {
+                            transactions
                         } else {
-                            None
+                            warn!("Some transactions are invalid. Checking them one by one...");
+                            self.verify_transactions(transactions, proofs)
                         }
                     }).collect();
 
@@ -204,36 +226,18 @@ impl Node {
     }
 
     async fn verify_block(&self, block: &Block) -> Vec<Vec<Transaction>> {
-        
-        let store = self.store.command_channel();
 
         let mut verified_block = Vec::with_capacity(block.payload.len());
 
-        #[cfg(feature = "parallel")] {
-            block.payload.par_iter().map(|digest| {
-                return self.verify_batch(store.clone(), digest);
-            }).collect_into_vec(&mut verified_block);
-
-            return join_all(verified_block).await;
+        for digest in &block.payload {
+            verified_block.push(self.verify_batch(self.store.command_channel(), &digest).await);
         }
 
-        #[cfg(not(feature = "parallel"))] {
-            for digest in &block.payload {
-                verified_block.push(self.verify_batch(store.clone(), &digest).await);
-            }
-
-            return verified_block;
-        }
+        return verified_block;
     }
 
     pub async fn analyze_block(&mut self) {
         info!("Starting analyze loop");
-
-        #[cfg(feature = "parallel")]
-        info!("Transaction signatures will be checked in parallel");
-
-        #[cfg(not(feature = "parallel"))]
-        info!("Transaction signatures will be checked sequentially");
 
         loop {
             tokio::select! {

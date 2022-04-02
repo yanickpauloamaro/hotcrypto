@@ -1,0 +1,90 @@
+
+-----------------------------------------
+ SUMMARY:
+-----------------------------------------
+ + CONFIG:
+ Faults: 0 nodes
+ Committee size: 4 nodes
+ Input rate: 50,000 tx/s
+ Transaction size: 184 B
+ Benchmark start: 02-04-2022 18:03:31
+ Benchmark end:   02-04-2022 18:05:32
+ Execution time: 121 s
+
+ Consensus timeout delay: 5,000 ms
+ Consensus sync retry delay: 5,000 ms
+ Mempool GC depth: 50 rounds
+ Mempool sync retry delay: 5,000 ms
+ Mempool sync retry nodes: 3 nodes
+ Mempool batch size: 500,000 B
+ Mempool max batch delay: 100 ms
+
+ + RESULTS:
+ Consensus TPS: 50,007 tx/s
+ Consensus BPS: 9,201,247 B/s
+ Consensus latency: 6 ms
+
+ Currency TPS: 49,299 tx/s
+ Currency BPS: 9,070,956 B/s
+ Currency latency: 2,268 ms
+-----------------------------------------
+
+-----------------------------------------
+ SUMMARY:
+-----------------------------------------
+ + CONFIG:
+ Faults: 0 nodes
+ Committee size: 4 nodes
+ Input rate: 50,000 tx/s
+ Transaction size: 184 B
+ Benchmark start: 02-04-2022 18:05:54
+ Benchmark end:   02-04-2022 18:07:55
+ Execution time: 121 s
+
+ Consensus timeout delay: 5,000 ms
+ Consensus sync retry delay: 5,000 ms
+ Mempool GC depth: 50 rounds
+ Mempool sync retry delay: 5,000 ms
+ Mempool sync retry nodes: 3 nodes
+ Mempool batch size: 500,000 B
+ Mempool max batch delay: 100 ms
+
+ + RESULTS:
+ Consensus TPS: 49,994 tx/s
+ Consensus BPS: 9,198,956 B/s
+ Consensus latency: 6 ms
+
+ Currency TPS: 44,851 tx/s
+ Currency BPS: 8,252,580 B/s
+ Currency latency: 3,701 ms
+-----------------------------------------
+
+-----------------------------------------
+ SUMMARY:
+-----------------------------------------
+ + CONFIG:
+ Faults: 0 nodes
+ Committee size: 4 nodes
+ Input rate: 50,000 tx/s
+ Transaction size: 184 B
+ Benchmark start: 02-04-2022 18:08:17
+ Benchmark end:   02-04-2022 18:10:18
+ Execution time: 121 s
+
+ Consensus timeout delay: 5,000 ms
+ Consensus sync retry delay: 5,000 ms
+ Mempool GC depth: 50 rounds
+ Mempool sync retry delay: 5,000 ms
+ Mempool sync retry nodes: 3 nodes
+ Mempool batch size: 500,000 B
+ Mempool max batch delay: 100 ms
+
+ + RESULTS:
+ Consensus TPS: 50,006 tx/s
+ Consensus BPS: 9,201,146 B/s
+ Consensus latency: 7 ms
+
+ Currency TPS: 44,534 tx/s
+ Currency BPS: 8,194,232 B/s
+ Currency latency: 3,080 ms
+-----------------------------------------

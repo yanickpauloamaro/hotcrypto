@@ -1,10 +1,12 @@
-#![allow(unused)]
-mod currency;
 mod node;
 mod config;
+mod compiler;
+mod transaction;
 
 use crate::config::Export as _;
 use crate::config::{ConfigError, Secret};
+use crate::compiler::{Compiler, currency_named_addresses};
+use crate::transaction::{SignedTransaction, Transaction, Account, Register, SAMPLE_TX_AMOUNT};
 
 use anyhow::{Context, Result};
 use bytes::BufMut as _;
@@ -20,13 +22,22 @@ use tokio::net::TcpStream;
 use tokio::time::{interval, sleep, Duration, Instant};
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
 
-use currency::{SignedTransaction, Transaction, Account, Register, SAMPLE_TX_AMOUNT};
 use crypto::{SecretKey, Signature, Hash as Digestable};
 use rand::seq::SliceRandom;
 use bytes::Bytes;
 
+use move_core_types::transaction_argument::TransactionArgument;
+
+use move_vm_runtime::move_vm::MoveVM;
+use move_vm_test_utils::InMemoryStorage;
+use move_vm_types::gas_schedule::GasStatus;
+use move_core_types::value::MoveValue;
+use move_core_types::language_storage::{ModuleId, StructTag, TypeTag};
+use move_core_types::account_address::AccountAddress;
+
 #[tokio::main]
 async fn main() {
+
     let matches = App::new(crate_name!())
         .version(crate_version!())
         .subcommand(
@@ -40,16 +51,16 @@ async fn main() {
                 .args_from_usage("--timeout=<INT> 'The nodes timeout value'")
                 .args_from_usage("--size=<INT> 'The size of each transaction in bytes'")
                 .args_from_usage("--rate=<INT> 'The rate (txs/s) at which to send the transactions'")
-                .args_from_usage("--nodes=[ADDR]... 'Network addresses that must be reachable before starting the benchmark.'")
                 .args_from_usage("--keys=<FILE> 'The file containing the node keys'")
                 .args_from_usage("--accounts=[FILE] 'The file containing accounts addresses'")
+                .args_from_usage("--nodes=[ADDR]... 'Network addresses that must be reachable before starting the benchmark.'")
         )
         .setting(AppSettings::ArgRequiredElseHelp)
         .get_matches();
 
     env_logger::Builder::from_env(Env::default().default_filter_or("info"))
-        .format_timestamp_millis()
-        .init();
+    .format_timestamp_millis()
+    .init();
 
     match matches.subcommand() {
         ("keys", Some(subm)) => {
@@ -66,6 +77,7 @@ async fn main() {
 }
 
 async fn run<'a>(matches: &ArgMatches<'_>) -> Result<()> {
+
     let target = matches
         .value_of("ADDR")
         .unwrap()
@@ -105,10 +117,11 @@ async fn run<'a>(matches: &ArgMatches<'_>) -> Result<()> {
         nodes,
         key_file,
         register_file
-    ).context("Failed to create client")?;
-    
+    ).expect("Failed to create client");
+
     info!("Node address: {}", target);
-    info!("Transactions size: {} B", client.transaction_size());
+    // info!("Transactions size: {} B", client.transaction_size());
+    info!("Transactions size: {} B", size);
     info!("Transactions rate: {} tx/s", rate);
 
     // Wait for all nodes to be online and synchronized.
@@ -146,7 +159,7 @@ impl Client {
 
         let secret = Secret::read(key_file)?;
         let mut register = Register::read(register_file)?;
-        register.accounts.retain(|account| *account != secret.name);
+        register.accounts.retain(|account| account.public_key != secret.name);
 
         info!("Account {:?}", secret.name);
 
@@ -163,10 +176,32 @@ impl Client {
             timeout,
             nodes,
             secret_key: secret.secret,
-            account: secret.name,
+            account: Account::new(secret.name),
             register
         })
     }
+
+    fn script_blob() -> Result<Vec<u8>> {
+
+        let script_code = format!("
+            import {}.BasicCoin;
+
+            main(account: signer, to: address, amount: u64) {{
+                label b0:
+                    BasicCoin.transfer(&account, move(to), move(amount));
+                    return;
+            }}
+        ",
+        currency_named_addresses().get("Currency").unwrap());
+
+        let compiler = Compiler::new()?;
+
+        compiler.into_script_blob(&script_code)
+    }
+
+    // fn script_blob_hot_crypto() -> Result<Vec<u8>> {
+    //     Ok(Vec::new())
+    // }
 
     pub async fn send(&self) -> Result<()> {
         const PRECISION: u64 = 20; // Sample precision.
@@ -183,6 +218,9 @@ impl Client {
         let mut nonce = 0;
         let mut r = rand::thread_rng();
         let mut transport = Framed::new(stream, LengthDelimitedCodec::new());
+
+        let script_blob = Client::script_blob()?;
+
         let interval = interval(Duration::from_millis(BURST_DURATION));
         tokio::pin!(interval);
 
@@ -198,22 +236,27 @@ impl Client {
                 let mut amount = 1;
                 if x == counter % burst {
                     // NOTE: This log entry is used to compute performance.
-                    info!("Sending sample transaction {} from {:?}", nonce, self.account);
+                    info!("Sending sample transaction {} from {:?}", nonce, self.account.address);
                     amount = SAMPLE_TX_AMOUNT; // This amount identifies sample transactions
                 };
 
                 let dest = *self.register.accounts.choose(&mut r).unwrap();
 
-                let transaction = Transaction{
-                    source: self.account,
-                    dest: dest,
-                    amount: amount,
-                    nonce: nonce
+                let args = vec![
+                    TransactionArgument::Address(dest.address),
+                    TransactionArgument::U64(amount),
+                ];
+
+                let tx = Transaction{
+                    source: self.account,   // => Will become first arg of main
+                    payload: script_blob.clone(),
+                    args: args,
+                    nonce: nonce,
                 };
 
-                let signature = Signature::new(&transaction.digest(), &self.secret_key);
+                let signature = Signature::new(&tx.digest(), &self.secret_key);
                 let signed = SignedTransaction{
-                    content: transaction,
+                    content: tx,
                     signature
                 };
 
@@ -235,25 +278,25 @@ impl Client {
         Ok(())
     }
 
-    fn transaction_size(&self) -> u64 {
-        let transaction = Transaction {
-            source: self.account,
-            dest: self.account,
-            amount: 0,
-            nonce: 0
-        };
+    // fn transaction_size(&self) -> u64 {
+    //     let transaction = Transaction {
+    //         source: self.account,
+    //         dest: self.account,
+    //         amount: 0,
+    //         nonce: 0
+    //     };
 
-        let signature = Signature::new(&transaction.digest(), &self.secret_key);
-        let signed = SignedTransaction {
-            content: transaction,
-            signature
-        };
+    //     let signature = Signature::new(&transaction.digest(), &self.secret_key);
+    //     let signed = SignedTransaction {
+    //         content: transaction,
+    //         signature
+    //     };
 
-        let size = bincode::serialized_size(&signed)
-            .expect("Failed to serialize signed transaction");
+    //     let size = bincode::serialized_size(&signed)
+    //         .expect("Failed to serialize signed transaction");
 
-        return size;
-    }
+    //     return size;
+    // }
 
     pub async fn wait(&self) {
         // First wait for all nodes to be online.

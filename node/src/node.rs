@@ -1,6 +1,7 @@
 use crate::config::Export as _;
 use crate::config::{Committee, ConfigError, Parameters, Secret};
-use crate::currency::*;
+use crate::transaction::*;
+use crate::compiler::Compiler;
 
 use consensus::{Block, Consensus};
 use crypto::{SignatureService, Digest};
@@ -16,13 +17,26 @@ use std::error::Error;
 use std::collections::HashMap;
 use tokio::sync::oneshot;
 use futures::sink::SinkExt as _;
-use crypto::{Signature, Hash as Digestable};
+use crypto::{PublicKey, Signature, Hash as Digestable};
 #[cfg(feature = "benchmark")]
 use ed25519_dalek::{Digest as _, Sha512};
 #[cfg(feature = "benchmark")]
 use std::convert::TryInto as _;
 use store::StoreCommand;
 use rayon::prelude::*;
+
+use anyhow::Result;
+
+use move_vm_runtime::move_vm::MoveVM;
+use move_vm_test_utils::InMemoryStorage;
+use move_vm_types::gas_schedule::GasStatus;
+use move_core_types::{
+    value::MoveValue,
+    account_address::AccountAddress
+};
+
+#[cfg(feature = "benchmark")]
+use move_core_types::transaction_argument::TransactionArgument;
 
 /// The default channel capacity for this module.
 pub const CHANNEL_CAPACITY: usize = 1_000;
@@ -138,25 +152,25 @@ impl Node {
         return msg.get_nonce() == self.get_nonce(source);
     }
 
-    fn verify_signature<M>(&self, msg: &M, source: &Account, signature: &Signature) -> bool
+    fn verify_signature<M>(&self, msg: &M, source: &PublicKey, signature: &Signature) -> bool
         where M: Digestable
     {
         return signature.verify(&msg.digest(), source).is_ok();
     }
 
-    fn transfer(&mut self, source: Account, dest: Account, amount: Currency) {
-        let source_balance = self.get_balance(&source);
-        let dest_balance = self.get_balance(&dest);
+    // fn transfer(&mut self, source: Account, dest: Account, amount: Currency) {
+    //     let source_balance = self.get_balance(&source);
+    //     let dest_balance = self.get_balance(&dest);
 
-        if source_balance >= amount {
-            self.accounts.insert(source, source_balance - amount);
-            self.accounts.insert(dest, dest_balance + amount);
-            // info!("Transfered {} from {} to {}... ", amount, source, dest);
-            // info!("Resulting balance for {} is {}$:", source, source_balance - amount);
-        }
-    }
+    //     if source_balance >= amount {
+    //         self.accounts.insert(source, source_balance - amount);
+    //         self.accounts.insert(dest, dest_balance + amount);
+    //         // info!("Transfered {} from {} to {}... ", amount, source, dest);
+    //         // info!("Resulting balance for {} is {}$:", source, source_balance - amount);
+    //     }
+    // }
 
-    fn verify_transactions(&self, transactions: Vec<Transaction>, proofs: Vec<(Account, Signature)>) -> Vec<Transaction> {
+    fn verify_transactions(&self, transactions: Vec<Transaction>, proofs: Vec<(PublicKey, Signature)>) -> Vec<Transaction> {
         transactions.into_iter().zip(proofs.iter())
             .filter_map(move |(tx, (key, signature))| {
                 if self.verify_signature(&tx, key, signature) {
@@ -203,7 +217,7 @@ impl Node {
 
                         for tx_vec in job {
                             let SignedTransaction{content: tx, signature} = SignedTransaction::from_vec(tx_vec);
-                            proofs.push((tx.source, signature));
+                            proofs.push((tx.source.public_key, signature));
                             digests.push(tx.digest());
                             transactions.push(tx);
                         }
@@ -237,6 +251,33 @@ impl Node {
     }
 
     pub async fn analyze_block(&mut self) {
+        
+        info!("Setting up MoveVM...");
+        let mut storage = InMemoryStorage::new();
+
+        let mut gas_status = GasStatus::new_unmetered();
+
+        let compiler = Compiler::new().expect("Failed to create compiler");
+
+        let vm = MoveVM::new(move_stdlib::natives::all_natives(
+            AccountAddress::from_hex_literal("0x1").unwrap(),
+        ))
+        .unwrap();
+
+        for module in compiler.dependencies() {
+            info!("Publishing and loading module {}", module.self_id().short_str_lossless());
+            
+            let mut blob = vec![];
+            module.serialize(&mut blob).unwrap();
+
+            storage.publish_or_overwrite_module(module.self_id(), blob);
+
+            vm.load_module(&module.self_id(), &storage).expect("Failed to load module");
+        }
+
+        info!("Creating accounts for all clients...");
+        // TODOTODO Create accounts and mint CONST_INITIAL_BALANCE for each
+
         info!("Starting analyze loop");
 
         loop {
@@ -247,7 +288,7 @@ impl Node {
                     // Verify request signature and send response
                     let SignedRequest{request, signature} = request;
 
-                    if self.verify_signature(&request, &request.source, &signature)
+                    if self.verify_signature(&request, &request.source.public_key, &signature)
                         && self.verify_nonce(&request, &request.source) {
 
                         self.increment_nonce(&request.source);
@@ -258,20 +299,60 @@ impl Node {
                     }
                 },
                 Some(block) = self.commit.recv() => {
-                    
+
                     let verified_block = self.verify_block(&block).await;
                     let zipped = block.payload.iter().zip(verified_block);
-                    
+
                     for (_digest, batch) in zipped {
                         for tx in &batch {
                             if self.verify_nonce(tx, &tx.source) {
                                 self.increment_nonce(&tx.source);
-                                self.transfer(tx.source, tx.dest, tx.amount);
 
                                 #[cfg(feature = "benchmark")]
-                                if tx.amount == SAMPLE_TX_AMOUNT {
+                                let is_sample = match tx.args.last() {
+                                    Some(TransactionArgument::U64(SAMPLE_TX_AMOUNT)) => true,
+                                    _ => false
+                                };
+
+                                let signer = MoveValue::Signer(tx.source.address);
+                                let mut tx_args: Vec<MoveValue> = tx.args.iter()
+                                    .map(|arg| MoveValue::from(arg.clone()))
+                                    .collect();
+
+                                tx_args.insert(0, signer);
+
+                                // self.transfer(tx.source, tx.dest, tx.amount);
+                                let mut sess = vm.new_session(&storage);
+                                let err = sess.execute_script(
+                                    tx.payload.clone(),
+                                    vec![], // ty_args: Vec<TypeTag>
+                                    tx_args.iter()
+                                        .map(|arg| arg.simple_serialize().unwrap())
+                                        .collect(),
+                                    &mut gas_status,
+                                )
+                                .map(|_| ());
+                                
+                                // match err {
+                                //     Ok(_) => warn!("VM output ok"),
+                                //     Err(other) => {
+                                //         warn!("VM output: {}", other);
+                                //         panic!("VMErr")
+                                //     }
+                                // };
+                                
+                                err.unwrap();
+
+                                let (changeset, _) = sess
+                                    .finish()
+                                    .unwrap(); // TODO What about errors?
+                                storage.apply(changeset).unwrap();
+
+
+                                #[cfg(feature = "benchmark")]
+                                if is_sample {
                                     // NOTE: This log entry is used to compute performance.
-                                    info!("Processed sample transaction {} from {:?}", tx.nonce, tx.source);
+                                    info!("Processed sample transaction {} from {:?}", tx.nonce, tx.source.address);
                                 }
                             }
                         }

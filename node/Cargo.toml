@@ -29,6 +29,17 @@ consensus = { path = "../consensus" }
 mempool = { path = "../mempool" }
 network = { path = "../network" }
 
+## Diem benchmark dependencies
+move-core-types = { path = "../move-main/language/move-core/types" }
+move-vm-runtime = { path = "../move-main/language/move-vm/runtime" }
+move-vm-types = { path = "../move-main/language/move-vm/types" }
+move-vm-test-utils = { path = "../move-main/language/move-vm/test-utils" }
+move-ir-compiler = { path = "../move-main/language/move-ir-compiler" }
+move-binary-format = { path = "../move-main/language/move-binary-format" }
+move-stdlib = { path = "../move-main/language/move-stdlib" }
+move-compiler = { path = "../move-main/language/move-compiler" }
+move-bytecode-verifier = { path = "../move-main/language/move-bytecode-verifier" }
+
 [features]
 benchmark = ["consensus/benchmark", "mempool/benchmark"]
 parallel = []

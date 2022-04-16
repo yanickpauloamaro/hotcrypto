@@ -1,6 +1,7 @@
 mod config;
 mod node;
-mod currency;
+mod transaction;
+mod compiler;
 
 use crate::config::Export as _;
 use crate::config::{Committee, Secret};

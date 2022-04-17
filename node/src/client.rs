@@ -173,7 +173,7 @@ impl Client {
         })
     }
 
-    fn script_blob() -> Result<Vec<u8>> {
+    pub fn script_blob() -> Result<Vec<u8>> {
 
         let script_code = format!("
             import {}.BasicCoin;

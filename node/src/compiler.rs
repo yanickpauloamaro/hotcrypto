@@ -62,7 +62,10 @@ fn expect_modules(
 
 fn compile_currency() -> Result<Vec<AnnotatedCompiledUnit>> {
 
-    let move_files = vec![signer_file(), error_file(), currency_module_file()];
+    let move_files = vec![
+        signer_file(), error_file(),
+        currency_module_file()
+    ];
 
     let move_compiler = MoveCompiler::new(
         vec![(move_files, currency_named_addresses())],

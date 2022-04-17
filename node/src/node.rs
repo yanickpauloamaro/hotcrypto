@@ -143,7 +143,7 @@ impl Node {
         Secret::new().write(filename)
     }
 
-    fn init_vm(register_file: &str) -> Result<(MoveVM, InMemoryStorage)> {
+    pub fn init_vm(register_file: &str) -> Result<(MoveVM, InMemoryStorage)> {
 
         info!("Setting up MoveVM...");
         let mut gas_status = GasStatus::new_unmetered();

@@ -56,7 +56,11 @@ module Currency::BasicCoin {
     fun withdraw(addr: address, amount: u64) : Coin acquires Balance {
         let balance = balance_of(addr);
         // balance must be greater than the withdraw amount
-        assert!(balance >= amount, Errors::limit_exceeded(EINSUFFICIENT_BALANCE));
+        //assert!(balance >= amount, Errors::limit_exceeded(EINSUFFICIENT_BALANCE));
+        //let balance_ref = &mut borrow_global_mut<Balance>(addr).coin.value;
+        //*balance_ref = balance - amount;
+        //Coin { value: amount }
+        if(balance < amount) return Coin { value: 0 };
         let balance_ref = &mut borrow_global_mut<Balance>(addr).coin.value;
         *balance_ref = balance - amount;
         Coin { value: amount }

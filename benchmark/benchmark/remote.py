@@ -71,20 +71,29 @@ class Bench:
             # This is missing from the Rocksdb installer (needed for Rocksdb).
             'sudo apt-get install -y clang',
 
-            # Clone the repo.
-            f'sudo apt-get install -y unzip'
+            f'sudo apt-get install -y unzip',            
         ]
+        cmd_diem = [
+            # Clone diem repo and run dependency script
+            f'(git clone {self.settings.repo_url} || (cd {self.settings.repo_name} ; git pull))',
+            f'(cd {self.settings.repo_name} ; yes | ./scripts/dev_setup.sh v)',
+            'source ~/.cargo/env',
+            ]
         hosts = self.manager.hosts(flat=True)
 
         try:
             ## Using public IP to connect to the instances
             public_ips = [x.public for x in hosts]
-
             g = Group(*public_ips, user='ubuntu', connect_kwargs=self.connect)
+
+            Print.info('Installing rust...')
             g.run(' && '.join(cmd), hide=True)
 
-            ## Send repo to the instances
-            self._upload(public_ips, cd=True)
+            Print.info('Cloning Diem repo and installing Diem dependencies...')
+            g.run(' && '.join(cmd_diem), hide=True)
+
+            Print.info('Uploading repo...')
+            self._upload(public_ips)
 
             Print.heading(f'Initialized testbed of {len(hosts)} nodes')
         except (GroupException, ExecutionError) as e:
@@ -93,7 +102,8 @@ class Bench:
 
     def remove(self):
         hosts = self.manager.hosts(flat=True)
-        filename = self.settings.repo_name
+        # filename = self.settings.repo_name
+        filename = 'hotcrypto' ##
 
         try:
             cmd = f'{CommandMaker.remove_repo(filename)} || true'
@@ -122,8 +132,10 @@ class Bench:
 
     def _upload(self, public_ips, cd=False):
         Print.info('Compressing repo...')
-        filename = self.settings.repo_name
-        zip_name = self.settings.repo_name
+        repo_name = 'hotcrypto'
+
+        filename = repo_name #self.settings.repo_name
+        zip_name = repo_name #self.settings.repo_name
         cmd = CommandMaker.compress_repo(filename, zip_name)
         subprocess.run([cmd], check=True, shell=True)
 
@@ -134,7 +146,7 @@ class Bench:
             c.put(f'{zip_name}.zip', '.')
 
         Print.info('Decompressing...')
-        decompress = CommandMaker.decompress_repo(self.settings.repo_name)
+        decompress = CommandMaker.decompress_repo(repo_name)
         cmd = [
             f'(({decompress}) || true)'
         ]
@@ -174,15 +186,17 @@ class Bench:
         public_ips = [x.public for x in hosts]
 
         ## Reupload code (Only ned to reupload if there was any changes to rust code)
-        self._upload(public_ips)
+        # self._upload(public_ips)
 
         ## Recompile code
-        Print.info(f'Recompiling...')
+        jobs = 2
+        repo_name = 'hotcrypto'
+        Print.info(f'Recompiling with {jobs} jobs...')
         cmd = [
             'source $HOME/.cargo/env',
-            f'(cd {self.settings.repo_name}/node && {CommandMaker.compile(parallel)})',
+            f'(cd {repo_name}/node && {CommandMaker.compile(jobs)})',
             CommandMaker.alias_binaries(
-                f'./{self.settings.repo_name}/target/release/'
+                f'./{repo_name}/target/release/'
             )
         ]
 
@@ -198,7 +212,8 @@ class Bench:
         subprocess.run([cmd], shell=True, stderr=subprocess.DEVNULL)
 
         # Recompile the latest code.
-        cmd = CommandMaker.compile(parallel).split()
+        jobs = 2    # //TODOTODO add self.jobs
+        cmd = CommandMaker.compile(jobs).split()
         subprocess.run(cmd, check=True, cwd=PathMaker.node_crate_path())
 
         # Create alias for the client and nodes binary.
@@ -294,6 +309,7 @@ class Bench:
                 db,
                 PathMaker.parameters_file(),
                 self.settings.request_port,
+                PathMaker.register_file(),
                 debug=debug
             )
             self._background_run(host, cmd, log_file)
@@ -308,7 +324,7 @@ class Bench:
             sleep(ceil(duration / 20))
         self.kill(hosts=hosts, delete_logs=False)
 
-    def _logs(self, hosts, faults):
+    def _get_logs(self, hosts):
         # Delete local logs (if any).
         cmd = CommandMaker.clean_logs()
         subprocess.run([cmd], shell=True, stderr=subprocess.DEVNULL)
@@ -321,6 +337,10 @@ class Bench:
             c.get(
                 PathMaker.client_log_file(i), local=PathMaker.client_log_file(i)
             )
+
+    def _logs(self, hosts, faults):
+        
+        self._get_logs(hosts)
 
         # Parse logs and return the parser.
         Print.info('Parsing logs and computing performance...')
@@ -347,6 +367,10 @@ class Bench:
         except (GroupException, ExecutionError) as e:
             e = FabricError(e) if isinstance(e, GroupException) else e
             raise BenchError('Failed to update nodes', e)
+
+        # Ensure there enough files can be opened
+        cmd = 'ulimit -n 3000'
+        subprocess.run([cmd], shell=True)
 
         # Run benchmarks.
         for n in bench_parameters.nodes:

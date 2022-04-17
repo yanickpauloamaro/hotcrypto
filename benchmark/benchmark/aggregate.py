@@ -56,8 +56,8 @@ class Result:
 
     @classmethod
     def from_str(cls, raw):
-        tps = int(search(r'.* Currency TPS: (\d+)', raw).group(1))
-        latency = int(search(r'.* Currency latency: (\d+)', raw).group(1))
+        tps = int(search(r'.* Currency-Move TPS: (\d+)', raw).group(1))
+        latency = int(search(r'.* Currency-Move latency: (\d+)', raw).group(1))
         return cls(tps, latency)
 
     @classmethod

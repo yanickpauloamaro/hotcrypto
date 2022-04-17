@@ -51,15 +51,19 @@ class LocalBench:
             sleep(0.5)  # Removing the store may take time.
 
             # Recompile the latest code.
-            cmd = CommandMaker.compile(parallel).split()
+            jobs = 2
+            Print.info(f'Recompiling with {jobs} jobs...')
+            cmd = CommandMaker.compile(jobs).split()
             subprocess.run(cmd, check=True, cwd=PathMaker.node_crate_path())
 
             # Create alias for the client and nodes binary.
+            # Print.info('Creating binary aliases...')
             cmd = CommandMaker.alias_binaries(PathMaker.binary_path())
             subprocess.run([cmd], shell=True)
 
             # Generate configuration files for nodes.
             keys = []
+            # Print.info('Generating node keys...')
             key_files = [PathMaker.key_file(i) for i in range(nodes)]
             for filename in key_files:
                 cmd = CommandMaker.generate_key(filename).split()
@@ -68,6 +72,7 @@ class LocalBench:
 
             # Generate configuration files for clients. ##
             client_keys = []
+            # Print.info('Generating client keys...')
             client_key_files = [PathMaker.key_file(i, 'client') for i in range(nodes)]
             for filename in client_key_files:
                 cmd = CommandMaker.generate_key(filename, 'client').split()
@@ -91,8 +96,9 @@ class LocalBench:
             request_ports = committee.request_ports
             rate_share = ceil(rate / nodes)
             timeout = self.node_parameters.timeout_delay
-            client_logs = [PathMaker.client_log_file(i) for i in range(nodes)]
 
+            # Print.info('Starting clients...')
+            client_logs = [PathMaker.client_log_file(i) for i in range(nodes)]
             for key_file, addr, port, log_file in zip(client_key_files, addresses, request_ports, client_logs):
                 cmd = CommandMaker.run_client(
                     addr,
@@ -105,6 +111,7 @@ class LocalBench:
                 self._background_run(cmd, log_file)
 
             # Run the nodes.
+            # Print.info('Starting nodes...')
             dbs = [PathMaker.db_path(i) for i in range(nodes)]
             node_logs = [PathMaker.node_log_file(i) for i in range(nodes)]
             for key_file, db, log_file, port in zip(key_files, dbs, node_logs, request_ports):
@@ -114,6 +121,7 @@ class LocalBench:
                     db,
                     PathMaker.parameters_file(),
                     port,
+                    PathMaker.register_file(),
                     debug=debug
                 )
                 self._background_run(cmd, log_file)

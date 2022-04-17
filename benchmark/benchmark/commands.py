@@ -15,10 +15,14 @@ class CommandMaker:
     def clean_logs():
         return f'rm -r {PathMaker.logs_path()} ; mkdir -p {PathMaker.logs_path()}'
 
+    # @staticmethod
+    # def compile(parallel=0):
+    #     str = ',parallel' if parallel else ''
+    #     return f'cargo build --quiet --release --features benchmark{str} --jobs 1'
     @staticmethod
-    def compile(parallel=0):
-        str = ',parallel' if parallel else ''
-        return f'cargo build --quiet --release --features benchmark{str}'
+    def compile(jobs = None):
+        str = '' if jobs is None else f'--jobs {jobs}'
+        return f'cargo build --quiet --release --features benchmark {str}'
 
     @staticmethod
     def generate_key(filename, bin='node'):
@@ -26,15 +30,16 @@ class CommandMaker:
         return f'./{bin} keys --filename {filename}'
 
     @staticmethod
-    def run_node(keys, committee, store, parameters, port, debug=False):
+    def run_node(keys, committee, store, parameters, port, register_file, debug=False):
         assert isinstance(keys, str)
         assert isinstance(committee, str)
         assert isinstance(parameters, str)
         # assert isinstance(port, str)
+        assert isinstance(register_file, str)
         assert isinstance(debug, bool)
         v = '-vvv' if debug else '-vv'
         return (f'./node {v} run --keys {keys} --committee {committee} '
-                f'--store {store} --parameters {parameters} --port {port}')
+                f'--store {store} --parameters {parameters} --port {port} --accounts {register_file}')
 
     @staticmethod
     def run_client(address, size, rate, timeout, keys, register_file, nodes=[]):

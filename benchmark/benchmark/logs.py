@@ -249,9 +249,9 @@ class LogParser:
             f' Consensus BPS: {round(consensus_bps):,} B/s\n'
             f' Consensus latency: {round(consensus_latency):,} ms\n'
             '\n'
-            f' Currency TPS: {round(currency_tps):,} tx/s\n'    ##
-            f' Currency BPS: {round(currency_bps):,} B/s\n'    ##
-            f' Currency latency: {round(currency_latency):,} ms\n' ##
+            f' Currency-Move TPS: {round(currency_tps):,} tx/s\n'    ##
+            f' Currency-Move BPS: {round(currency_bps):,} B/s\n'    ##
+            f' Currency-Move latency: {round(currency_latency):,} ms\n' ##
             '-----------------------------------------\n'
         )
 

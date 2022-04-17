@@ -97,9 +97,10 @@ class Register:    ##
     def __init__(self, names):
         assert isinstance(names, list) and all(
             isinstance(x, str) for x in names)
-        self.json = {
-            'accounts': names
-        }
+        # self.json = {
+        #     'accounts': names
+        # }
+        self.json = names
 
     def print(self, filename):
         assert isinstance(filename, str)

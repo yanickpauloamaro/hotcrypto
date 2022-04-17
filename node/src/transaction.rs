@@ -13,7 +13,9 @@ use move_core_types::{
     value::MoveValue,
     transaction_argument::TransactionArgument
 };
-use std::fs::{self};
+use std::fs::{self, OpenOptions};
+use std::io::BufWriter;
+use std::io::Write as _;
 
 pub type Currency = u64;
 pub const CONST_INITIAL_BALANCE: Currency = 100;
@@ -61,6 +63,22 @@ impl Export for Register {
             Ok(Self { accounts })
         };
         reader().map_err(|e| ConfigError::ReadError {
+            file: path.to_string(),
+            message: e.to_string(),
+        })
+    }
+
+    fn write(&self, path: &str) -> Result<(), ConfigError> {
+        let writer = || -> Result<(), std::io::Error> {
+            let file = OpenOptions::new().create(true).write(true).open(path)?;
+            let mut writer = BufWriter::new(file);
+            let to_write: Vec<_> = self.accounts.iter().map(|account| account.public_key).collect();
+            let data = serde_json::to_string_pretty(&to_write).unwrap();
+            writer.write_all(data.as_ref())?;
+            writer.write_all(b"\n")?;
+            Ok(())
+        };
+        writer().map_err(|e| ConfigError::WriteError {
             file: path.to_string(),
             message: e.to_string(),
         })
@@ -129,18 +147,6 @@ pub struct Transaction {
     pub nonce: u64          // 8B
 }
 
-
-// fn to_ref<'a>(tx_arg: &'a TransactionArgument) -> &'a[u8] {
-//     match tx_arg {
-//         TransactionArgument::U8(arg) => &[*arg],
-//         TransactionArgument::U64(arg) => &arg.to_le_bytes(),
-//         TransactionArgument::U128(arg) => &arg.to_le_bytes(),
-//         TransactionArgument::Address(arg) => arg.as_ref(),
-//         TransactionArgument::U8Vector(vec) => vec.as_ref(),
-//         TransactionArgument::Bool(arg) => &[*arg as u8],
-//     }
-// }
-
 fn to_single_ref<'a>(tx_args: Vec<TransactionArgument>) -> Vec<u8> {
     tx_args.iter()
         .flat_map(|arg| {
@@ -151,31 +157,11 @@ fn to_single_ref<'a>(tx_args: Vec<TransactionArgument>) -> Vec<u8> {
         .collect()
 }
 
-// fn to_ref(tx_arg:  TransactionArgument) -> [u8] {
-//     match tx_arg {
-//         TransactionArgument::U8(arg) => [arg],
-//         TransactionArgument::U64(arg) => arg.to_le_bytes(),
-//         TransactionArgument::U128(arg) => arg.to_le_bytes(),
-//         TransactionArgument::Address(arg) => arg.as_ref(),
-//         TransactionArgument::U8Vector(vec) => vec.as_ref(),
-//         TransactionArgument::Bool(arg) => [arg as u8],
-//     }
-// }
-
-// impl AsRef<[u8]> for Vec<&[u8]> {
-//     fn as_ref(&self) -> &[u8] {
-//         // let args_ref: Vec<&[u8]> = self.iter().map(|arg| to_ref(arg)).collect();
-
-//     }
-// }
-
 impl Digestable for Transaction {
     fn digest(&self) -> Digest {
         let mut hasher = Sha512::new();
         // hasher.update(self.source);
         hasher.update(self.payload.clone());
-        // let args_ref: Vec<&[u8]> = self.args.iter().map(|arg| to_ref(arg)).collect();
-        // hasher.update(args_ref);
         hasher.update(to_single_ref(self.args.clone()));
         hasher.update(self.nonce.to_le_bytes());
         Digest(hasher.finalize().as_slice()[..32].try_into().unwrap())

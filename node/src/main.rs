@@ -1,3 +1,4 @@
+#![allow(unused)]
 mod config;
 mod node;
 mod transaction;
@@ -6,6 +7,8 @@ mod compiler;
 use crate::config::Export as _;
 use crate::config::{Committee, Secret};
 use crate::node::Node;
+use crate::transaction::{Account, Register};
+
 use clap::{crate_name, crate_version, App, AppSettings, SubCommand};
 use consensus::Committee as ConsensusCommittee;
 use env_logger::Env;
@@ -33,7 +36,8 @@ async fn main() {
                 .args_from_usage("--committee=<FILE> 'The file containing committee information'")
                 .args_from_usage("--parameters=[FILE] 'The file containing the node parameters'")
                 .args_from_usage("--store=<PATH> 'The path where to create the data store'")
-                .args_from_usage("--port=<PORT> 'The port from which nodes will listen for requests'"),
+                .args_from_usage("--port=<PORT> 'The port from which nodes will listen for requests'")
+                .args_from_usage("--accounts=[FILE] 'The file containing accounts addresses'"),
         )
         .subcommand(
             SubCommand::with_name("deploy")
@@ -68,8 +72,9 @@ async fn main() {
             let parameters_file = subm.value_of("parameters");
             let store_path = subm.value_of("store").unwrap();
             let port = subm.value_of("port").unwrap();
+            let register_file = subm.value_of("accounts").unwrap();
 
-            match Node::new(committee_file, key_file, store_path, parameters_file, port).await {
+            match Node::new(committee_file, key_file, store_path, parameters_file, port, register_file).await {
                 Ok(mut node) => {
                     tokio::spawn(async move {
                         node.analyze_block().await;
@@ -134,6 +139,16 @@ fn deploy_testbed(nodes: usize) -> Result<Vec<JoinHandle<()>>, Box<dyn std::erro
     }
     .write(committee_file)?;
 
+    // Print register file
+    let keys: Vec<_> = (0..nodes).map(|_| Secret::new()).collect();
+    let accounts: Vec<_> = keys.iter().map(|secret| Account::new(secret.name)).collect();
+    let register_file = "register.json";
+    let _ = fs::remove_file(register_file);
+    Register{
+        accounts
+    }
+    .write(register_file)?;
+
     // Write the key files and spawn all nodes.
     keys.iter()
         .enumerate()
@@ -148,7 +163,7 @@ fn deploy_testbed(nodes: usize) -> Result<Vec<JoinHandle<()>>, Box<dyn std::erro
             let port = format!("{}", 25_300 + i);
 
             Ok(tokio::spawn(async move {
-                match Node::new(committee_file, &key_file, &store_path, None, &port).await {
+                match Node::new(committee_file, &key_file, &store_path, None, &port, register_file).await {
                     Ok(mut node) => {
                         // Sink the commit channel.
                         while node.commit.recv().await.is_some() {}

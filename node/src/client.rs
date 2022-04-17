@@ -1,3 +1,4 @@
+#![allow(unused)]
 mod node;
 mod config;
 mod compiler;
@@ -9,8 +10,6 @@ use crate::compiler::{Compiler, currency_named_addresses};
 use crate::transaction::{SignedTransaction, Transaction, Account, Register, SAMPLE_TX_AMOUNT};
 
 use anyhow::{Context, Result};
-use bytes::BufMut as _;
-use bytes::BytesMut;
 use clap::{crate_name, crate_version, App, AppSettings, SubCommand, ArgMatches};
 use env_logger::Env;
 use futures::future::join_all;
@@ -27,13 +26,6 @@ use rand::seq::SliceRandom;
 use bytes::Bytes;
 
 use move_core_types::transaction_argument::TransactionArgument;
-
-use move_vm_runtime::move_vm::MoveVM;
-use move_vm_test_utils::InMemoryStorage;
-use move_vm_types::gas_schedule::GasStatus;
-use move_core_types::value::MoveValue;
-use move_core_types::language_storage::{ModuleId, StructTag, TypeTag};
-use move_core_types::account_address::AccountAddress;
 
 #[tokio::main]
 async fn main() {
@@ -120,8 +112,8 @@ async fn run<'a>(matches: &ArgMatches<'_>) -> Result<()> {
     ).expect("Failed to create client");
 
     info!("Node address: {}", target);
-    // info!("Transactions size: {} B", client.transaction_size());
-    info!("Transactions size: {} B", size);
+    info!("Transactions size: {} B", client.transaction_size());
+    // info!("Transactions size: {} B", size);
     info!("Transactions rate: {} tx/s", rate);
 
     // Wait for all nodes to be online and synchronized.
@@ -278,25 +270,30 @@ impl Client {
         Ok(())
     }
 
-    // fn transaction_size(&self) -> u64 {
-    //     let transaction = Transaction {
-    //         source: self.account,
-    //         dest: self.account,
-    //         amount: 0,
-    //         nonce: 0
-    //     };
+    fn transaction_size(&self) -> u64 {
+        let args = vec![
+            TransactionArgument::Address(self.account.address),
+            TransactionArgument::U64(0),
+        ];
 
-    //     let signature = Signature::new(&transaction.digest(), &self.secret_key);
-    //     let signed = SignedTransaction {
-    //         content: transaction,
-    //         signature
-    //     };
+        let transaction = Transaction{
+            source: self.account,   // => Will become first arg of main
+            payload: Client::script_blob().expect("Failed to create script blob"),
+            args: args,
+            nonce: 0,
+        };
 
-    //     let size = bincode::serialized_size(&signed)
-    //         .expect("Failed to serialize signed transaction");
+        let signature = Signature::new(&transaction.digest(), &self.secret_key);
+        let signed = SignedTransaction {
+            content: transaction,
+            signature
+        };
 
-    //     return size;
-    // }
+        let size = bincode::serialized_size(&signed)
+            .expect("Failed to serialize signed transaction");
+
+        return size;
+    }
 
     pub async fn wait(&self) {
         // First wait for all nodes to be online.

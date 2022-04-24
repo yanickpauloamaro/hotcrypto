@@ -16,10 +16,10 @@
         "branch": "benchmark-hotcrypto-baseline"
     },
     "instances": {
-        "type": "c5.4xlarge",
+        "type": "c5.xlarge",
         "regions": ["eu-west-3"]
     },
     "validity": {
-        "duration": 4
+        "duration": 5
     }
 }

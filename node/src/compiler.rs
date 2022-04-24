@@ -1,17 +1,17 @@
 use anyhow::{Result, bail};
-use std::path::PathBuf;
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 use move_binary_format::{
     file_format::CompiledModule
 };
+use move_bytecode_verifier::{verify_module};
 use move_compiler::{
     Compiler as MoveCompiler,
     compiled_unit::AnnotatedCompiledUnit,
     shared::NumericalAddress,
 };
 use move_ir_compiler::Compiler as IRCompiler;
-use move_bytecode_verifier::{verify_module};
 
 pub struct Compiler {
     deps: Vec<CompiledModule>
@@ -38,9 +38,9 @@ impl Compiler {
         self.compiler().into_script_blob(code)
     }
 
-    pub fn into_compiled_module(self, code: &str) -> Result<CompiledModule> {
-        self.compiler().into_compiled_module(code)
-    }
+    // pub fn into_compiled_module(self, code: &str) -> Result<CompiledModule> {
+    //     self.compiler().into_compiled_module(code)
+    // }
 
     pub fn dependencies(&self) -> Vec<&CompiledModule> {
         self.compiler().deps

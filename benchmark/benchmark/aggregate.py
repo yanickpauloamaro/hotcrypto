@@ -89,7 +89,7 @@ class LogAggregator:
         for chunk in data.replace(',', '').split('SUMMARY')[1:]:
             if chunk:
                 records[Setup.from_str(chunk)] += [Result.from_str(chunk)]
-                x = search(r'.* Parallel processing', data)
+                x = search(r'.* Parallel processing', data) # TODOTODO Remove parallel thing
                 if parallel or not x is None:
                     parallel = True
 

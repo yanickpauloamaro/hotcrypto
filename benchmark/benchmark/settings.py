@@ -38,6 +38,10 @@ class Settings:
         self.repo_url = repo_url
         self.branch = branch
 
+        self.diem_name = 'diem'
+        self.diem_url = 'https://github.com/diem/diem.git'
+        self.diem_branch = 'main'
+
         self.instance_type = instance_type
         self.aws_regions = regions
 

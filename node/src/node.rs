@@ -1,8 +1,8 @@
 #![allow(unused)]
 use crate::config::Export as _;
-use crate::config::{Committee, ConfigError, Parameters, Secret};
+use crate::config::{Committee, ConfigError, Parameters, Secret, Register};
 use crate::transaction::*;
-use crate::compiler::{Compiler, currency_named_addresses};
+use crate::utils::{Mode, init_vm};
 
 use consensus::{Block, Consensus};
 use crypto::{SignatureService, Digest};
@@ -23,6 +23,8 @@ use crypto::{PublicKey, Signature, Hash as Digestable};
 use ed25519_dalek::{Digest as _, Sha512};
 #[cfg(feature = "benchmark")]
 use std::convert::TryInto as _;
+use std::collections::BinaryHeap;
+use std::cmp::{Reverse, Ordering};
 use store::StoreCommand;
 use rayon::prelude::*;
 use anyhow::Result;
@@ -35,19 +37,20 @@ use move_core_types::{
     account_address::AccountAddress
 };
 
-#[cfg(feature = "benchmark")]
 use move_core_types::transaction_argument::TransactionArgument;
 
 /// The default channel capacity for this module.
 pub const CHANNEL_CAPACITY: usize = 1_000;
 const BATCH_JOB_COUNT: usize = 3;
+type Batch = Vec<Transaction>;
 
 pub struct Node {
-    pub commit: Receiver<Block>,
+    pub commit: Receiver<Vec<(Digest, Batch)>>,
     pub request: Receiver<(SignedRequest, oneshot::Sender<Currency>)>,
-    pub store: Store,
-    pub accounts: HashMap<Account, Currency>,
-    pub nonces: HashMap<Account, Nonce>,
+    pub accounts: HashMap<AccountAddress, Currency>,
+    pub nonces: HashMap<AccountAddress, Nonce>,
+    backlogs: HashMap<AccountAddress, BinaryHeap<Reverse<Transaction>>>,
+    mode: Mode,
     storage: InMemoryStorage,
     vm: MoveVM
 }
@@ -60,11 +63,13 @@ impl Node {
         parameters: Option<&str>,
         port: &str,
         register_file: &str,
+        mode: &str
     ) -> Result<Self, ConfigError> {
         let (tx_commit, rx_commit) = channel(CHANNEL_CAPACITY);
         let (tx_consensus_to_mempool, rx_consensus_to_mempool) = channel(CHANNEL_CAPACITY);
         let (tx_mempool_to_consensus, rx_mempool_to_consensus) = channel(CHANNEL_CAPACITY);
         let (tx_request, rx_request) = channel(CHANNEL_CAPACITY);
+        let (tx_verified, rx_verified) = channel(CHANNEL_CAPACITY);
 
         // Read the committee and secret key from file.
         let committee = Committee::read(committee_file)?;
@@ -124,148 +129,278 @@ impl Node {
             tx_commit,
         );
 
-        let (vm, storage) = Node::init_vm(register_file)
-            .expect("Unable initialize move vm");
+        let register = Register::read(register_file)?;
+        
+        let (vm, storage) = init_vm(&register)
+        .expect("Unable initialize move vm");
+        
+        let balances = register.accounts
+        .iter().map(|account| (account.address, CONST_INITIAL_BALANCE));
+        
+        let nonces = register.accounts
+        .iter().map(|account| (account.address, 0));
+        
+        let backlogs = register.accounts
+        .iter().map(|account| (account.address, BinaryHeap::new()));
+        
+        let mode = mode.parse::<Mode>()?;
+        CryptoVerifier::spawn(
+            mode.clone(),
+            store,
+            rx_commit,
+            tx_verified
+        );
 
         info!("Node {} successfully booted", name);
         Ok(Self {
-                commit: rx_commit,
+                commit: rx_verified,
                 request: rx_request,
-                store: store,
-                accounts: HashMap::new(),
-                nonces: HashMap::new(),
+                accounts: balances.collect(),
+                nonces: nonces.collect(),
+                backlogs: backlogs.collect(),
+                mode,
                 storage,
-                vm
+                vm,
             })
     }
 
-    pub fn print_key_file(filename: &str) -> Result<(), ConfigError> {
-        Secret::new().write(filename)
-    }
-
-    pub fn init_vm(register_file: &str) -> Result<(MoveVM, InMemoryStorage)> {
-
-        info!("Setting up MoveVM...");
-        let mut gas_status = GasStatus::new_unmetered();
-
-        let compiler = Compiler::new().expect("Failed to create compiler");
-
-        let vm = MoveVM::new(move_stdlib::natives::all_natives(
-            AccountAddress::from_hex_literal("0x1").unwrap(),
-        ))
-        .unwrap();
-
-        let mut storage = InMemoryStorage::new();
-
-        for module in compiler.dependencies() {
-            info!("Publishing and loading module {}", module.self_id().short_str_lossless());
-
-            let mut blob = vec![];
-            module.serialize(&mut blob).unwrap();
-
-            storage.publish_or_overwrite_module(module.self_id(), blob);
-
-            vm.load_module(&module.self_id(), &storage).expect("Failed to load module");
-        }
-
-        info!("Creating accounts for all clients...");
-        let mut sess = vm.new_session(&storage);
-
-        let module_address = AccountAddress::from_hex_literal("0xCAFE").unwrap();
-        let module_signer = MoveValue::Signer(module_address);
-
-        let publish_and_mint = Node::publish_and_mint()?;
-
-        let register = Register::read(register_file)?;
-        for account in register.accounts {
-            let mut args = vec![module_signer.clone()];
-            args.push(MoveValue::Signer(account.address));
-            args.push(MoveValue::Address(account.address));
-            args.push(MoveValue::U64(CONST_INITIAL_BALANCE));
-
-            // TODOTODO Add clients to hashmap so that we can compare movevm vs manual transactions
-            let err = sess.execute_script(
-                publish_and_mint.clone(),
-                vec![], // ty_args: Vec<TypeTag>
-                args.iter()
-                    .map(|arg| arg.simple_serialize().unwrap())
-                    .collect(),
-                &mut gas_status,
-            )
-            .map(|_| ());
-
-            err.unwrap();
-        }
-
-        let (changeset, _) = sess
-            .finish()
-            .unwrap();
-        storage.apply(changeset).unwrap();
-
-        Ok((vm, storage))
-    }
-
-    fn publish_and_mint() -> Result<Vec<u8>> {
-
-        let script_code = format!("
-                import {}.BasicCoin;
-
-                main(owner: signer, account: signer, account_addr: address, amount: u64) {{
-                    label b0:
-                        BasicCoin.publish_balance(&account);
-                        BasicCoin.mint(&owner, move(account_addr), move(amount));
-                        return;
-                }}
-            ",
-            currency_named_addresses().get("Currency").unwrap()
-        );
-
-        let compiler = Compiler::new()?;
-
-        compiler.into_script_blob(&script_code)
-    }
-
-    fn get_balance(&self, account: &Account) -> Currency {
+    fn get_balance(&self, account: &AccountAddress) -> Currency {
         return self.accounts.get(&account).unwrap_or(&CONST_INITIAL_BALANCE).clone();
     }
 
-    fn get_nonce(&self, account: &Account) -> u64 {
+    fn get_nonce(&self, account: &AccountAddress) -> u64 {
         return self.nonces.get(&account).unwrap_or(&0u64).clone();
     }
 
-    fn increment_nonce(&mut self, account: &Account) {
+    fn increment_nonce(&mut self, account: &AccountAddress) {
         let nonce = self.nonces.entry(*account).or_insert(0);
         *nonce += 1;
     }
 
-    fn verify_nonce<M>(&self, msg: &M, source: &Account) -> bool
+    fn verify_nonce<M>(&self, msg: &M, source: &AccountAddress) -> bool
         where M: Nonceable
     {
         return msg.get_nonce() == self.get_nonce(source);
     }
 
-    fn verify_signature<M>(&self, msg: &M, source: &PublicKey, signature: &Signature) -> bool
+    fn compare_nonce<M>(&self, msg: &M, source: &AccountAddress) -> Ordering
+        where M: Nonceable
+    {
+        return msg.get_nonce().cmp(&self.get_nonce(source));
+    }
+
+    fn transfer(&mut self, source: AccountAddress, dest: AccountAddress, amount: Currency) {
+        let source_balance = self.get_balance(&source);
+        let dest_balance = self.get_balance(&dest);
+
+        if source_balance >= amount {
+            self.accounts.insert(source, source_balance - amount);
+            self.accounts.insert(dest, dest_balance + amount);
+            // info!("Transfered {} from {} to {}... ", amount, source, dest);
+            // info!("Resulting balance for {} is {}$:", source, source_balance - amount);
+        }
+    }    
+
+    fn get_arguments(&self, args: &Vec<TransactionArgument>) -> Result<(AccountAddress, Currency)> {
+        if args.len() < 2 {
+            panic!("Not enough arguments of transaction");
+        }
+        match (&args[0], &args[1]) {
+            (TransactionArgument::Address(dest), TransactionArgument::U64(amount)) => Ok((*dest, *amount)),
+            _ => panic!("Transaction arguments have incorrect types")
+        }
+    }
+
+    pub async fn analyze_block(&mut self) {
+        
+        info!("Starting analyze loop");
+        let mut gas_status = GasStatus::new_unmetered();
+
+        loop {
+            tokio::select! {
+                Some((request, tx_response)) = self.request.recv() => {
+                    // info!("Received request from {}", request.request.source);
+
+                    // Verify request signature and send response
+                    let SignedRequest{request, signature} = request;
+
+                    if CryptoVerifier::verify_signature(&request, &request.source.public_key, &signature)
+                        && self.verify_nonce(&request, &request.source.address) {
+
+                        self.increment_nonce(&request.source.address);
+
+                        // There is only one type of request for now
+                        let balance = self.get_balance(&request.source.address);
+                        let _err = tx_response.send(balance);
+                    }
+                },
+                Some(verified_block) = self.commit.recv() => {
+
+                    for (_digest, batch) in verified_block {
+                        for tx in &batch {
+                            match self.compare_nonce(tx, &tx.source.address) {
+                                Ordering::Equal => {
+                                    self.increment_nonce(&tx.source.address);
+                                    self.execute_transaction(tx, &mut gas_status);
+
+                                    while self.has_progress(&tx.source.address) {
+                                        let backlog = self.backlogs.get_mut(&tx.source.address).unwrap();
+                                        let Reverse(next) = backlog.pop().unwrap();
+
+                                        // warn!("Processing transaction {} from {}'s backlog...", next.nonce, tx.source.address);
+                                        self.increment_nonce(&tx.source.address);
+                                        self.execute_transaction(&next, &mut gas_status);
+                                    }
+                                }
+                                Ordering::Greater => {
+                                    // warn!("Transaction from {} too new. Got {} instead of {}", tx.source.address, tx.nonce, self.get_nonce(&tx.source.address));
+                                    let backlog = self.backlogs.get_mut(&tx.source.address).unwrap();
+                                    let clone: Transaction = (*tx).clone();
+                                    backlog.push(Reverse(clone));
+                                }
+                                Ordering::Less => {
+                                    // warn!("Transaction from {} too old. Got {} instead of {}", tx.source.address, tx.nonce, self.get_nonce(&tx.source.address));
+                                }
+                            }
+                        }
+
+                        // NOTE: This log entry is used to compute performance.
+                        #[cfg(feature = "benchmark")]
+                        info!("Batch {:?} contains {} currency tx", _digest, batch.len());
+                    }
+                }
+            }
+        }
+    }
+
+    fn has_progress(&self, address: &AccountAddress) -> bool {
+        let backlog = self.backlogs.get(address).unwrap();
+
+        if let Some(Reverse(next)) = backlog.peek() {
+            self.verify_nonce(next, address)
+        } else {
+            false
+        }
+
+    }
+
+    fn execute_transaction(&mut self, tx: &Transaction, gas_status: &mut GasStatus) {
+        #[cfg(feature = "benchmark")]
+        let is_sample = match tx.args.last() {
+            Some(TransactionArgument::U64(SAMPLE_TX_AMOUNT)) => true,
+            _ => false
+        };
+
+        match &self.mode {
+            Mode::HotCrypto => {
+                let (dest, amount) = self.get_arguments(&tx.args).unwrap();
+                self.transfer(tx.source.address, dest, amount);
+            }
+            Mode::HotMove => {
+                let signer = MoveValue::Signer(tx.source.address);
+                let mut tx_args: Vec<MoveValue> = tx.args.iter()
+                    .map(|arg| MoveValue::from(arg.clone()))
+                    .collect();
+
+                tx_args.insert(0, signer);
+
+                let mut sess = self.vm.new_session(&self.storage);
+                let err = sess.execute_script(
+                    tx.payload.clone(),
+                    vec![], // ty_args: Vec<TypeTag>
+                    tx_args.iter()
+                        .map(|arg| arg.simple_serialize().unwrap())
+                        .collect(),
+                    gas_status,
+                )
+                .map(|_| ());
+
+                // match err {
+                //     Ok(_) => warn!("VM output ok"),
+                //     Err(other) => {
+                //         warn!("VM output: {}", other);
+                //         panic!("VMErr")
+                //     }
+                // };
+
+                err.unwrap();
+
+                let (changeset, _) = sess
+                    .finish()
+                    .unwrap(); // TODO What about errors?
+                self.storage.apply(changeset).unwrap();
+            }
+            mode => panic!("Unknown mode: {:?}", mode)
+        }
+
+
+        #[cfg(feature = "benchmark")]
+        if is_sample {
+            // NOTE: This log entry is used to compute performance.
+            info!("Processed sample transaction {} from {:?}", tx.nonce, tx.source.address);
+        }
+    }
+}
+
+// ------------------------------------------------------------------------
+struct CryptoVerifier {
+    pub store: Store,
+    pub to_verify: Receiver<Block>,
+    pub verified: Sender<Vec<(Digest, Batch)>>,
+}
+
+impl CryptoVerifier {
+    fn spawn(
+        mode: Mode,
+        store: Store,
+        to_verify: Receiver<Block>,
+        verified: Sender<Vec<(Digest, Batch)>>) {
+
+        let verifier = CryptoVerifier{
+            store,
+            to_verify,
+            verified,
+        };
+        
+        tokio::spawn(async move {
+            match mode {
+                Mode::HotStuff => verifier.do_nothing().await,
+                Mode::HotCrypto | Mode::HotMove => verifier.verify_blocks().await,
+                Mode::MoveVM => ()
+            }
+        });
+    }
+
+    async fn do_nothing(mut self) {
+        while let Some(block) = self.to_verify.recv().await {
+
+        }
+    }
+
+    async fn verify_blocks(mut self) {
+        while let Some(block) = self.to_verify.recv().await {
+            let mut verified_block = Vec::with_capacity(block.payload.len());
+
+            for digest in &block.payload {
+                // info!("Block {} contains batch {:?}", block, digest);
+                let verified = Self::verify_batch(self.store.command_channel(), &digest).await;
+                verified_block.push((digest.clone(), verified));
+            }
+    
+            self.verified.send(verified_block).await;
+        }
+    }
+
+    fn verify_signature<M>(msg: &M, source: &PublicKey, signature: &Signature) -> bool
         where M: Digestable
     {
         return signature.verify(&msg.digest(), source).is_ok();
     }
 
-    // fn transfer(&mut self, source: Account, dest: Account, amount: Currency) {
-    //     let source_balance = self.get_balance(&source);
-    //     let dest_balance = self.get_balance(&dest);
-
-    //     if source_balance >= amount {
-    //         self.accounts.insert(source, source_balance - amount);
-    //         self.accounts.insert(dest, dest_balance + amount);
-    //         // info!("Transfered {} from {} to {}... ", amount, source, dest);
-    //         // info!("Resulting balance for {} is {}$:", source, source_balance - amount);
-    //     }
-    // }
-
-    fn verify_transactions(&self, transactions: Vec<Transaction>, proofs: Vec<(PublicKey, Signature)>) -> Vec<Transaction> {
+    fn verify_signatures(transactions: Vec<Transaction>, proofs: Vec<(PublicKey, Signature)>) -> Vec<Transaction> {
         transactions.into_iter().zip(proofs.iter())
             .filter_map(move |(tx, (key, signature))| {
-                if self.verify_signature(&tx, key, signature) {
+                if Self::verify_signature(&tx, key, signature) {
                     Some(tx)
                 } else {
                     None
@@ -273,7 +408,7 @@ impl Node {
             }).collect()
     }
 
-    async fn verify_batch(&self, store: Sender<StoreCommand>, key: &Digest) -> Vec<Transaction> {
+    async fn verify_batch(store: Sender<StoreCommand>, key: &Digest) -> Vec<Transaction> {
 
         let (sender, receiver) = oneshot::channel();
 
@@ -286,7 +421,7 @@ impl Node {
             .expect("Failed to get batch from storage")
             .expect("Batch was not in storage");
 
-        info!("Deserializing stored batch...");
+        info!("Deserializing stored batch {:?}...", key);
         let mempool_message = bincode::deserialize(&serialized)
             .expect("Failed to deserialize batch");
 
@@ -318,9 +453,24 @@ impl Node {
                             transactions
                         } else {
                             warn!("Some transactions are invalid. Checking them one by one...");
-                            self.verify_transactions(transactions, proofs)
+                            Self::verify_signatures(transactions, proofs)
                         }
                     }).collect();
+
+                #[cfg(feature = "benchmark")]
+                for tx in &verified_batch {
+                    match tx.args.last() {
+                        Some(TransactionArgument::U64(SAMPLE_TX_AMOUNT)) => {
+                            // NOTE: This log entry is used to compute performance.
+                            info!("Verified sample transaction {} from {:?}", tx.nonce, tx.source.address);
+                        },
+                        _ => ()
+                    };
+                }
+
+                // NOTE: This log entry is used to compute performance. TODOTODO
+                #[cfg(feature = "benchmark")]
+                info!("Batch {:?} contains {} crypto tx", key, verified_batch.len());
 
                 return verified_batch;
             },
@@ -330,118 +480,9 @@ impl Node {
             }
         }
     }
-
-    async fn verify_block(&self, block: &Block) -> Vec<Vec<Transaction>> {
-
-        let mut verified_block = Vec::with_capacity(block.payload.len());
-
-        for digest in &block.payload {
-            verified_block.push(self.verify_batch(self.store.command_channel(), &digest).await);
-        }
-
-        return verified_block;
-    }
-
-    pub async fn analyze_block(&mut self) {
-
-        info!("Starting analyze loop");
-        let mut gas_status = GasStatus::new_unmetered();
-
-        loop {
-            tokio::select! {
-                Some((request, tx_response)) = self.request.recv() => {
-                    // info!("Received request from {}", request.request.source);
-
-                    // Verify request signature and send response
-                    let SignedRequest{request, signature} = request;
-
-                    if self.verify_signature(&request, &request.source.public_key, &signature)
-                        && self.verify_nonce(&request, &request.source) {
-
-                        self.increment_nonce(&request.source);
-
-                        // There is only one type of request for now
-                        let balance = self.get_balance(&request.source);
-                        let _err = tx_response.send(balance);
-                    }
-                },
-                Some(block) = self.commit.recv() => {
-
-                    let verified_block = self.verify_block(&block).await;
-                    let zipped = block.payload.iter().zip(verified_block);
-
-                    for (_digest, batch) in zipped {
-                        for tx in &batch {
-                            if self.verify_nonce(tx, &tx.source) {
-                                self.increment_nonce(&tx.source);
-
-                                #[cfg(feature = "benchmark")]
-                                let is_sample = match tx.args.last() {
-                                    Some(TransactionArgument::U64(SAMPLE_TX_AMOUNT)) => true,
-                                    _ => false
-                                };
-
-                                let signer = MoveValue::Signer(tx.source.address);
-                                let mut tx_args: Vec<MoveValue> = tx.args.iter()
-                                    .map(|arg| MoveValue::from(arg.clone()))
-                                    .collect();
-
-                                tx_args.insert(0, signer);
-
-                                // self.transfer(tx.source, tx.dest, tx.amount);
-                                let mut sess = self.vm.new_session(&self.storage);
-                                let err = sess.execute_script(
-                                    tx.payload.clone(),
-                                    vec![], // ty_args: Vec<TypeTag>
-                                    tx_args.iter()
-                                        .map(|arg| arg.simple_serialize().unwrap())
-                                        .collect(),
-                                    &mut gas_status,
-                                )
-                                .map(|_| ());
-
-                                // match err {
-                                //     Ok(_) => warn!("VM output ok"),
-                                //     Err(other) => {
-                                //         warn!("VM output: {}", other);
-                                //         panic!("VMErr")
-                                //     }
-                                // };
-
-                                err.unwrap();
-
-                                let (changeset, _) = sess
-                                    .finish()
-                                    .unwrap(); // TODO What about errors?
-                                self.storage.apply(changeset).unwrap();
-
-
-                                #[cfg(feature = "benchmark")]
-                                if is_sample {
-                                    // NOTE: This log entry is used to compute performance.
-                                    info!("Processed sample transaction {} from {:?}", tx.nonce, tx.source.address);
-                                }
-                            }
-                        }
-
-                        #[cfg(feature = "benchmark")]
-                        {
-                            // NOTE: This is one extra hash that is only needed to print the following log entries.
-                            let digest = Digest(
-                                Sha512::digest(&_digest.to_vec()).as_slice()[..32]
-                                    .try_into()
-                                    .unwrap(),
-                            );
-                            // NOTE: This log entry is used to compute performance.
-                            info!("Batch {:?} contains {} currency tx", digest, batch.len());
-                        }
-                    }
-                }
-            }
-        }
-    }
 }
 
+// ------------------------------------------------------------------------
 /// Defines how the network receiver handles incoming transactions.
 #[derive(Clone)]
 struct RequestReceiverHandler {

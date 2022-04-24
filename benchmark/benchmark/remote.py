@@ -34,6 +34,7 @@ class Bench:
     def __init__(self, ctx):
         self.manager = InstanceManager.make()
         self.settings = self.manager.settings
+        self.jobs = 2
         try:
             ctx.connect_kwargs.pkey = RSAKey.from_private_key_file(
                 self.manager.settings.key_path
@@ -53,7 +54,7 @@ class Bench:
 
     def install(self):
 
-        Print.info('Installing rust and decompressing the repo...')
+        # Print.info('Installing rust and decompressing the repo...')
         cmd = [
             'sudo apt-get update',
             'sudo apt-get -y upgrade',
@@ -73,10 +74,11 @@ class Bench:
 
             f'sudo apt-get install -y unzip',            
         ]
+
         cmd_diem = [
             # Clone diem repo and run dependency script
-            f'(git clone {self.settings.repo_url} || (cd {self.settings.repo_name} ; git pull))',
-            f'(cd {self.settings.repo_name} ; yes | ./scripts/dev_setup.sh v)',
+            f'(git clone {self.settings.diem_url} || (cd {self.settings.diem_name} ; git pull))',
+            f'(cd {self.settings.diem_name} ; yes | ./scripts/dev_setup.sh v)',
             'source ~/.cargo/env',
             ]
         hosts = self.manager.hosts(flat=True)
@@ -92,6 +94,7 @@ class Bench:
             Print.info('Cloning Diem repo and installing Diem dependencies...')
             g.run(' && '.join(cmd_diem), hide=True)
 
+            # TODOTODO make hotcrypto repo public and clone it instead of zip/sending it
             Print.info('Uploading repo...')
             self._upload(public_ips)
 
@@ -102,8 +105,7 @@ class Bench:
 
     def remove(self):
         hosts = self.manager.hosts(flat=True)
-        # filename = self.settings.repo_name
-        filename = 'hotcrypto' ##
+        filename = self.settings.repo_name
 
         try:
             cmd = f'{CommandMaker.remove_repo(filename)} || true'
@@ -132,10 +134,9 @@ class Bench:
 
     def _upload(self, public_ips, cd=False):
         Print.info('Compressing repo...')
-        repo_name = 'hotcrypto'
 
-        filename = repo_name #self.settings.repo_name
-        zip_name = repo_name #self.settings.repo_name
+        filename = self.settings.repo_name
+        zip_name = self.settings.repo_name
         cmd = CommandMaker.compress_repo(filename, zip_name)
         subprocess.run([cmd], check=True, shell=True)
 
@@ -146,7 +147,7 @@ class Bench:
             c.put(f'{zip_name}.zip', '.')
 
         Print.info('Decompressing...')
-        decompress = CommandMaker.decompress_repo(repo_name)
+        decompress = CommandMaker.decompress_repo(self.settings.repo_name)
         cmd = [
             f'(({decompress}) || true)'
         ]
@@ -177,7 +178,7 @@ class Bench:
         output = c.run(cmd, hide=True)
         self._check_stderr(output)
 
-    def _update(self, hosts, parallel=0):
+    def _update(self, hosts):
         Print.info(
             f'Updating {len(hosts)} nodes...'
         )
@@ -185,18 +186,17 @@ class Bench:
         # Using public IP to connect to the instances
         public_ips = [x.public for x in hosts]
 
+        # TODOTODO make hotcrypto repo public and pull new changes instead of reuploading
         ## Reupload code (Only ned to reupload if there was any changes to rust code)
         # self._upload(public_ips)
 
         ## Recompile code
-        jobs = 2
-        repo_name = 'hotcrypto'
-        Print.info(f'Recompiling with {jobs} jobs...')
+        Print.info(f'Recompiling with {self.jobs} jobs...')
         cmd = [
             'source $HOME/.cargo/env',
-            f'(cd {repo_name}/node && {CommandMaker.compile(jobs)})',
+            f'(cd {self.settings.repo_name}/node && {CommandMaker.compile(self.jobs)})',
             CommandMaker.alias_binaries(
-                f'./{repo_name}/target/release/'
+                f'./{self.settings.repo_name}/target/release/'
             )
         ]
 
@@ -204,7 +204,7 @@ class Bench:
         g = Group(*public_ips, user='ubuntu', connect_kwargs=self.connect)
         g.run(' && '.join(cmd), hide=True)
 
-    def _config(self, hosts, node_parameters, parallel=0):
+    def _config(self, hosts, node_parameters):
         Print.info('Generating configuration files...')
 
         # Cleanup all local configuration files.
@@ -212,8 +212,7 @@ class Bench:
         subprocess.run([cmd], shell=True, stderr=subprocess.DEVNULL)
 
         # Recompile the latest code.
-        jobs = 2    # //TODOTODO add self.jobs
-        cmd = CommandMaker.compile(jobs).split()
+        cmd = CommandMaker.compile(self.jobs).split()
         subprocess.run(cmd, check=True, cwd=PathMaker.node_crate_path())
 
         # Create alias for the client and nodes binary.
@@ -270,7 +269,7 @@ class Bench:
 
         return committee
 
-    def _run_single(self, hosts, rate, bench_parameters, node_parameters, debug=False):
+    def _run_single(self, hosts, rate, bench_parameters, node_parameters, mode, debug=False):
         Print.info('Booting testbed...')
 
         # Kill any potentially unfinished run and delete logs.
@@ -292,8 +291,10 @@ class Bench:
                 bench_parameters.tx_size,
                 rate_share,
                 timeout,
+                bench_parameters.duration,
                 key_file,
                 PathMaker.register_file(),
+                mode,
                 nodes=addresses,
             )
             self._background_run(host, cmd, log_file)
@@ -310,6 +311,7 @@ class Bench:
                 PathMaker.parameters_file(),
                 self.settings.request_port,
                 PathMaker.register_file(),
+                mode,
                 debug=debug
             )
             self._background_run(host, cmd, log_file)
@@ -346,9 +348,9 @@ class Bench:
         Print.info('Parsing logs and computing performance...')
         return LogParser.process(PathMaker.logs_path(), faults=faults)
 
-    def run(self, bench_parameters_dict, node_parameters_dict, debug=False, parallel=0):
+    def run(self, bench_parameters_dict, node_parameters_dict, mode, debug=False):
         assert isinstance(debug, bool)
-        Print.heading('Starting remote benchmark')
+        Print.heading(f'Starting remote benchmark of {mode}')
         try:
             bench_parameters = BenchParameters(bench_parameters_dict)
             node_parameters = NodeParameters(node_parameters_dict)
@@ -363,13 +365,13 @@ class Bench:
 
         # Update nodes.
         try:
-            self._update(selected_hosts, parallel)
+            self._update(selected_hosts)
         except (GroupException, ExecutionError) as e:
             e = FabricError(e) if isinstance(e, GroupException) else e
             raise BenchError('Failed to update nodes', e)
 
         # Ensure there enough files can be opened
-        cmd = 'ulimit -n 3000'
+        cmd = 'ulimit -n 6000'
         subprocess.run([cmd], shell=True)
 
         # Run benchmarks.
@@ -380,7 +382,7 @@ class Bench:
 
                 # Upload all configuration files.
                 try:
-                    self._config(hosts, node_parameters, parallel)
+                    self._config(hosts, node_parameters)
                 except (subprocess.SubprocessError, GroupException) as e:
                     e = FabricError(e) if isinstance(e, GroupException) else e
                     Print.error(BenchError('Failed to configure nodes', e))
@@ -395,10 +397,10 @@ class Bench:
                     Print.heading(f'Run {i+1}/{bench_parameters.runs}')
                     try:
                         self._run_single(
-                            hosts, r, bench_parameters, node_parameters, debug
+                            hosts, r, bench_parameters, node_parameters, mode, debug
                         )
                         self._logs(hosts, faults).print(PathMaker.result_file(
-                            faults, n, r, bench_parameters.tx_size
+                            faults, n, r, bench_parameters.tx_size, mode
                         ))
                     except (subprocess.SubprocessError, GroupException, ParseError) as e:
                         self.kill(hosts=hosts)

@@ -1,24 +1,22 @@
-use crate::config::{Export, ConfigError};
-
+use bytes::Bytes;
 use crypto::{PublicKey, Signature, Hash as Digestable, Digest};
+use ed25519_dalek::Digest as _;
 use ed25519_dalek::Sha512;
 use serde::{Deserialize, Serialize};
-use bytes::Bytes;
-use std::hash::Hash;
-use ed25519_dalek::Digest as _;
 use std::convert::TryInto;
+use std::hash::Hash;
+use std::cmp::{Ord, Ordering};
 
 use move_core_types::{
     account_address::AccountAddress,
     value::MoveValue,
     transaction_argument::TransactionArgument
 };
-use std::fs::{self, OpenOptions};
-use std::io::BufWriter;
-use std::io::Write as _;
 
 pub type Currency = u64;
 pub const CONST_INITIAL_BALANCE: Currency = 100;
+#[cfg(feature = "benchmark")]
+pub const NORMAL_TX_AMOUNT: Currency = 1;
 #[cfg(feature = "benchmark")]
 pub const SAMPLE_TX_AMOUNT: Currency = 2;
 
@@ -45,43 +43,6 @@ impl Account {
 impl AsRef<[u8]> for Account {
     fn as_ref(&self) -> &[u8] {
         self.public_key.as_ref()
-    }
-}
-
-// ------------------------------------------------------------------------
-#[derive(Clone, Serialize, Deserialize)]
-pub struct Register {
-    pub accounts: Vec<Account>
-}
-
-impl Export for Register {
-    fn read(path: &str) -> Result<Self, ConfigError> {
-        let reader = || -> Result<Self, std::io::Error> {
-            let data = fs::read(path)?;
-            let keys: Vec<PublicKey> = serde_json::from_slice(data.as_slice())?;
-            let accounts = keys.iter().map(|key| Account::new(key.clone())).collect();
-            Ok(Self { accounts })
-        };
-        reader().map_err(|e| ConfigError::ReadError {
-            file: path.to_string(),
-            message: e.to_string(),
-        })
-    }
-
-    fn write(&self, path: &str) -> Result<(), ConfigError> {
-        let writer = || -> Result<(), std::io::Error> {
-            let file = OpenOptions::new().create(true).write(true).open(path)?;
-            let mut writer = BufWriter::new(file);
-            let to_write: Vec<_> = self.accounts.iter().map(|account| account.public_key).collect();
-            let data = serde_json::to_string_pretty(&to_write).unwrap();
-            writer.write_all(data.as_ref())?;
-            writer.write_all(b"\n")?;
-            Ok(())
-        };
-        writer().map_err(|e| ConfigError::WriteError {
-            file: path.to_string(),
-            message: e.to_string(),
-        })
     }
 }
 
@@ -139,7 +100,7 @@ pub struct SignedRequest {
 }
 
 // ------------------------------------------------------------------------
-#[derive(Debug, Serialize, Deserialize, Hash)]
+#[derive(Debug, Clone, Eq, Serialize, Deserialize, Hash)]
 pub struct Transaction {
     pub source: Account,    // 32B
     pub payload: Vec<u8>,
@@ -174,6 +135,25 @@ impl Nonceable for Transaction {
     }
 }
 
+impl Ord for Transaction {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.nonce.cmp(&other.nonce)
+    }
+}
+
+impl PartialOrd for Transaction {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for Transaction {
+    fn eq(&self, other: &Self) -> bool {
+        self.nonce == other.nonce
+    }
+}
+
+// ------------------------------------------------------------------------
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SignedTransaction {
     pub content: Transaction,
@@ -200,7 +180,20 @@ impl SignedTransaction {
 
     pub fn from_vec(vec: &Vec<u8>) -> SignedTransaction {
 
+        if cfg!(feature = "benchmark") {
+            // NOTE: During benchmark there are 9 bytes prepended to the serialized
+            return SignedTransaction::from_slice(&vec[9..]);
+        }
+        
         let tx = bincode::deserialize(&vec)
+            .expect("Failed to deserialize a transaction");
+
+        return tx;
+    }
+
+    pub fn from_slice(slice: &[u8]) -> SignedTransaction {
+
+        let tx = bincode::deserialize(&slice)
             .expect("Failed to deserialize a transaction");
 
         return tx;

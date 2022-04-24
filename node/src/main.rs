@@ -3,17 +3,19 @@ mod config;
 mod node;
 mod transaction;
 mod compiler;
+mod utils;
 
 use crate::config::Export as _;
-use crate::config::{Committee, Secret};
+use crate::config::{Committee, Secret, Register};
 use crate::node::Node;
-use crate::transaction::{Account, Register};
+use crate::transaction::{Account};
+use crate::utils::print_key_file;
 
 use clap::{crate_name, crate_version, App, AppSettings, SubCommand};
 use consensus::Committee as ConsensusCommittee;
 use env_logger::Env;
 use futures::future::join_all;
-use log::error;
+use log::{warn, error};
 use mempool::Committee as MempoolCommittee;
 use std::fs;
 use tokio::task::JoinHandle;
@@ -37,12 +39,14 @@ async fn main() {
                 .args_from_usage("--parameters=[FILE] 'The file containing the node parameters'")
                 .args_from_usage("--store=<PATH> 'The path where to create the data store'")
                 .args_from_usage("--port=<PORT> 'The port from which nodes will listen for requests'")
-                .args_from_usage("--accounts=[FILE] 'The file containing accounts addresses'"),
+                .args_from_usage("--accounts=[FILE] 'The file containing accounts addresses'")
+                .args_from_usage("[MODE] 'One of: hotstuff, hotcrypto, hotmove, movevm (default is hotstuff)'"),
         )
         .subcommand(
             SubCommand::with_name("deploy")
                 .about("Deploys a network of nodes locally")
-                .args_from_usage("--nodes=<INT> 'The number of nodes to deploy'"),
+                .args_from_usage("--nodes=<INT> 'The number of nodes to deploy'")
+                .args_from_usage("[MODE] 'One of: hotstuff, hotcrypto, hotmove, movevm (default is hotstuff)'"),
         )
         .setting(AppSettings::SubcommandRequiredElseHelp)
         .get_matches();
@@ -62,7 +66,7 @@ async fn main() {
     match matches.subcommand() {
         ("keys", Some(subm)) => {
             let filename = subm.value_of("filename").unwrap();
-            if let Err(e) = Node::print_key_file(filename) {
+            if let Err(e) = print_key_file(filename) {
                 error!("{}", e);
             }
         }
@@ -73,8 +77,9 @@ async fn main() {
             let store_path = subm.value_of("store").unwrap();
             let port = subm.value_of("port").unwrap();
             let register_file = subm.value_of("accounts").unwrap();
+            let mode = subm.value_of("MODE").unwrap_or_default();
 
-            match Node::new(committee_file, key_file, store_path, parameters_file, port, register_file).await {
+            match Node::new(committee_file, key_file, store_path, parameters_file, port, register_file, mode).await {
                 Ok(mut node) => {
                     tokio::spawn(async move {
                         node.analyze_block().await;
@@ -87,8 +92,9 @@ async fn main() {
         }
         ("deploy", Some(subm)) => {
             let nodes = subm.value_of("nodes").unwrap();
+            let mode = subm.value_of("MODE").unwrap_or_default();
             match nodes.parse::<usize>() {
-                Ok(nodes) if nodes > 1 => match deploy_testbed(nodes) {
+                Ok(nodes) if nodes > 1 => match deploy_testbed(nodes, mode) {
                     Ok(handles) => {
                         let _ = join_all(handles).await;
                     }
@@ -101,7 +107,7 @@ async fn main() {
     }
 }
 
-fn deploy_testbed(nodes: usize) -> Result<Vec<JoinHandle<()>>, Box<dyn std::error::Error>> {
+fn deploy_testbed(nodes: usize, mode: &str) -> Result<Vec<JoinHandle<()>>, Box<dyn std::error::Error>> {
     let keys: Vec<_> = (0..nodes).map(|_| Secret::new()).collect();
 
     // Print the committee file.
@@ -162,8 +168,10 @@ fn deploy_testbed(nodes: usize) -> Result<Vec<JoinHandle<()>>, Box<dyn std::erro
 
             let port = format!("{}", 25_300 + i);
 
+            let mode = mode.to_string();
+
             Ok(tokio::spawn(async move {
-                match Node::new(committee_file, &key_file, &store_path, None, &port, register_file).await {
+                match Node::new(committee_file, &key_file, &store_path, None, &port, register_file, &mode).await {
                     Ok(mut node) => {
                         // Sink the commit channel.
                         while node.commit.recv().await.is_some() {}

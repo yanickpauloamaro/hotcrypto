@@ -8,14 +8,14 @@ from benchmark.instance import InstanceManager
 from benchmark.remote import Bench, BenchError
 
 @task
-def local(ctx, parallel=0):
+def local(ctx, mode='hotmove'):
     ''' Run benchmarks on localhost '''
     bench_params = {
         'faults': 0,
         'nodes': 2,
-        'rate': 1_000,
+        'rate': 10_000,
         'tx_size': 512,
-        'duration': 20,
+        'duration': 30,
     }
     node_params = {
         'consensus': {
@@ -30,10 +30,12 @@ def local(ctx, parallel=0):
             'max_batch_delay': 10
         }
     }
+
+    if mode not in ['hotstuff', 'hotcrypto', 'hotmove', 'movevm']:
+        print('Unknown mode')
+        return
     try:
-        if parallel:
-            print("Parallel benchmark")
-        ret = LocalBench(bench_params, node_params).run(debug=False, parallel=parallel).result()
+        ret = LocalBench(bench_params, node_params).run(mode, debug=False).result()
         print(ret)
     except BenchError as e:
         Print.error(e)
@@ -103,7 +105,7 @@ def install(ctx):
 
 
 @task
-def remote(ctx, parallel=0):
+def remote(ctx, mode='hotmove'):
     ''' Run benchmarks on AWS (N nodes across all regions) '''
     bench_params = {
         'faults': 0,
@@ -111,7 +113,9 @@ def remote(ctx, parallel=0):
         'tx_size': 128,
         'nodes': [4],
         'rate': [25_000],
-        'duration': 300,
+        # 'duration': 300,
+        # 'runs': 3,
+        'duration': 30,
         'runs': 1,
     }
 
@@ -128,13 +132,20 @@ def remote(ctx, parallel=0):
             'max_batch_delay': 100
         }
     }
-    try:
-        if parallel:
-            print("Parallel benchmark")
-        Bench(ctx).run(bench_params, node_params, debug=False, parallel=parallel)
-    except BenchError as e:
-        Print.error(e)
+    # if mode not in ['hotstuff', 'hotcrypto', 'hotmove', 'movevm']:
+    #     print('Unknown mode')
+    #     return
 
+    # try:
+    #     Bench(ctx).run(bench_params, node_params, mode, debug=False)
+    # except BenchError as e:
+    #     Print.error(e)
+
+    for mode in ['hotstuff', 'hotcrypto', 'hotmove', 'movevm']:
+        try:
+            Bench(ctx).run(bench_params, node_params, mode, debug=False)
+        except BenchError as e:
+            Print.error(e)
 
 @task
 def plot(ctx):

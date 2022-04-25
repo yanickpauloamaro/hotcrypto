@@ -36,6 +36,8 @@ use move_vm_runtime::move_vm::MoveVM;
 use move_vm_test_utils::InMemoryStorage;
 use move_vm_types::gas_schedule::GasStatus;
 
+extern crate num_cpus;
+
 #[tokio::main]
 async fn main() {
 
@@ -134,7 +136,9 @@ async fn run<'a>(matches: &ArgMatches<'_>) -> Result<()> {
         _ => unreachable!()
     };
 
+    let cores = num_cpus::get();
     info!("Benchmarking {}", boxed.to_string());
+    info!("Number of cores: {}", cores);
     info!("Transactions size: {} B", boxed.transaction_size());
     info!("Transactions rate: {} tx/s", rate);
 

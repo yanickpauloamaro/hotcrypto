@@ -22,6 +22,7 @@ anyhow = "1.0.38"
 async-trait = "0.1.50"
 ed25519-dalek = "1.0.1"
 rayon = "1.5.1"
+num_cpus = "1.13.1"
 
 crypto = { path = "../crypto" }
 store = { path = "../store" }
@@ -42,14 +43,8 @@ move-bytecode-verifier = { path = "../move-main/language/move-bytecode-verifier"
 
 [features]
 benchmark = ["consensus/benchmark", "mempool/benchmark"]
-parallel = []
 
 [[bin]]         
 name = "client"   
 path = "src/client.rs" 
-required-features = ["benchmark"] 
-
-[[bin]]         
-name = "bench_move"   
-path = "src/move.rs"
 required-features = ["benchmark"] 

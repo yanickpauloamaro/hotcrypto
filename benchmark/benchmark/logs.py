@@ -32,7 +32,7 @@ class LogParser:
                 results = p.map(self._parse_clients, clients)
         except (ValueError, IndexError) as e:
             raise ParseError(f'Failed to parse client logs: {e}')
-        self.tx_size, self.rate, start, end, misses, self.mode, \
+        self.tx_size, self.rate, start, end, misses, self.mode, self.cores, \
             consensus_samples, currency_samples, \
             move_samples, move_commits, self.move_nb_tx \
             = zip(*results)
@@ -124,6 +124,7 @@ class LogParser:
             raise ParseError('Client(s) panicked')
 
         mode = search(r'Benchmarking (.*)', log).group(1)
+        cores = int(search(r'Number of cores: (\d+)', log).group(1))
         size = int(search(r'Transactions size: (\d+)', log).group(1))
         rate = int(search(r'Transactions rate: (\d+)', log).group(1))
 
@@ -142,7 +143,7 @@ class LogParser:
 
         move_samples, move_commits, move_nb_tx = self._parse_move_client(log)
         
-        return size, rate, start, end, misses, mode, \
+        return size, rate, start, end, misses, mode, cores, \
             consensus_samples, currency_samples, \
             move_samples, move_commits, move_nb_tx
 
@@ -377,7 +378,6 @@ class LogParser:
                 f' End-to-end TPS: {round(consensus_e2e_tps):,} tx/s\n'
                 f' End-to-end BPS: {round(consensus_e2e_bps):,} B/s\n'
                 f' End-to-end latency: {round(consensus_e2e_latency):,} ms\n'
-                f'\n'
                 )
         return consensus_str
 
@@ -419,10 +419,10 @@ class LogParser:
             currency_tps, currency_bps, _ = self._crypto_throughput()
             currency_latency = self._crypto_latency() * 1000
             currency_str = (
+                f'\n'
                 f' Currency crypto TPS: {round(currency_tps):,} tx/s\n'
                 f' Currency crypto BPS: {round(currency_bps):,} B/s\n'
                 f' Currency crypto latency: {round(currency_latency):,} ms\n'
-                f'\n'
             )
 
             if self.mode[0] in ['HotMove']:
@@ -430,10 +430,10 @@ class LogParser:
                 currency_e2e_latency = self._currency_latency() * 1000
                 currency_str = (
                     f'{currency_str}'
+                    f'\n'
                     f' Currency TPS: {round(currency_e2e_tps):,} tx/s\n'
                     f' Currency BPS: {round(currency_e2e_bps):,} B/s\n'
                     f' Currency latency: {round(currency_e2e_latency):,} ms\n'
-                    f'\n'
                 )
         
         return currency_str
@@ -444,6 +444,7 @@ class LogParser:
             movevm_tps = self._move_throughput()
             movevm_latency = self._move_latency() * 1000
             move_str = (
+                f' Number of accounts: {self.committee_size}\n'
                 f' MoveVM TPS: {round(movevm_tps):,} tx/s\n'
                 f' MoveVM latency: {round(movevm_latency):,} ms\n'
             )
@@ -457,6 +458,10 @@ class LogParser:
             f' SUMMARY: {self.mode[0]}\n'
             '-----------------------------------------\n'
             f'{self._consensus_config()}'
+            '-----------------------------------------\n'
+            ' + INFO:\n'
+            f' Number of cores: {self.cores[0]}\n'
+            '-----------------------------------------\n'
             ' + RESULTS:\n'
             f'{self._consensus_result()}'
             f'{self._currency_result()}'

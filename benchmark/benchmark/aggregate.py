@@ -10,12 +10,13 @@ from benchmark.utils import PathMaker
 
 
 class Setup:
-    def __init__(self, nodes, rate, tx_size, faults):
+    def __init__(self, nodes, rate, tx_size, faults, cores):
         self.nodes = nodes
         self.rate = rate
         self.tx_size = tx_size
         self.faults = faults
         self.max_latency = 'any'
+        self.cores = cores
 
     def __str__(self):
         return (
@@ -24,6 +25,7 @@ class Setup:
             f' Input rate: {self.rate} tx/s\n'
             f' Transaction size: {self.tx_size} B\n'
             f' Max latency: {self.max_latency} ms\n'
+            f' Number of cores: {self.cores} ms\n'
         )
 
     def __eq__(self, other):
@@ -38,7 +40,8 @@ class Setup:
         rate = int(search(r'.* Input rate: (\d+)', raw).group(1))
         tx_size = int(search(r'.* Transaction size: (\d+)', raw).group(1))
         faults = int(search(r'.* Faults: (\d+)', raw).group(1))
-        return cls(nodes, rate, tx_size, faults)
+        cores = int(search(r'.* Number of cores: (\d+)', raw).group(1))
+        return cls(nodes, rate, tx_size, faults, cores)
 
 
 class Result:

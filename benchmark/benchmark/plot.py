@@ -30,10 +30,6 @@ class Ploter:
         def try_cast(text): return int(text) if text.isdigit() else text
         return [try_cast(c) for c in split('(\d+)', text)]
 
-    def _parallel(self, data):
-        x = search(r'.* Parallel processing', data)
-        return not x is None
-
     def _tps(self, data):
         values = findall(r' TPS: (\d+) \+/- (\d+)', data)
         values = [(int(x), int(y)) for x, y in values]
@@ -61,7 +57,6 @@ class Ploter:
         plt.figure()
         markers = cycle(['o', 'v', 's', 'p', 'D', 'P'])
         self.results.sort(key=self._natural_keys, reverse=(type == 'tps'))
-        tmp = False
         for result in self.results:
             y_values, y_err = y_axis(result)
             x_values = self._variable(result)
@@ -72,8 +67,6 @@ class Ploter:
                 x_values, y_values, yerr=y_err, label=z_axis(result),
                 linestyle='dotted', marker=next(markers), capsize=3
             )
-            if not tmp and self._parallel(result):
-                tmp = True
 
         plt.legend(loc='lower center', bbox_to_anchor=(0.5, 1), ncol=2)
         plt.xlim(xmin=0)
@@ -92,7 +85,7 @@ class Ploter:
             secaxy.yaxis.set_major_formatter(StrMethodFormatter('{x:,.0f}'))
 
         for x in ['pdf', 'png']:
-            plt.savefig(PathMaker.plot_file(type, x, parallel=tmp), bbox_inches='tight')
+            plt.savefig(PathMaker.plot_file(type, x), bbox_inches='tight')
 
     @staticmethod
     def nodes(data):

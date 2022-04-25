@@ -31,9 +31,13 @@ class ExecutionError(Exception):
 
 
 class Bench:
-    def __init__(self, ctx):
+    def __init__(self, ctx, mode):
         self.manager = InstanceManager.make()
         self.settings = self.manager.settings
+
+        self.instance_type = self.settings.instance_type.replace('.', '_')
+        self.mode = mode
+
         self.jobs = 2
         try:
             ctx.connect_kwargs.pkey = RSAKey.from_private_key_file(
@@ -269,7 +273,7 @@ class Bench:
 
         return committee
 
-    def _run_single(self, hosts, rate, bench_parameters, node_parameters, mode, debug=False):
+    def _run_single(self, hosts, rate, bench_parameters, node_parameters, debug=False):
         Print.info('Booting testbed...')
 
         # Kill any potentially unfinished run and delete logs.
@@ -294,31 +298,32 @@ class Bench:
                 bench_parameters.duration,
                 key_file,
                 PathMaker.register_file(),
-                mode,
+                self.mode,
                 nodes=addresses,
             )
             self._background_run(host, cmd, log_file)
 
-        # Run the nodes.
-        key_files = [PathMaker.key_file(i) for i in range(len(hosts))]
-        dbs = [PathMaker.db_path(i) for i in range(len(hosts))]
-        node_logs = [PathMaker.node_log_file(i) for i in range(len(hosts))]
-        for host, key_file, db, log_file in zip(hosts, key_files, dbs, node_logs):
-            cmd = CommandMaker.run_node(
-                key_file,
-                PathMaker.committee_file(),
-                db,
-                PathMaker.parameters_file(),
-                self.settings.request_port,
-                PathMaker.register_file(),
-                mode,
-                debug=debug
-            )
-            self._background_run(host, cmd, log_file)
+        if self.mode not in ['movevm']:
+            # Run the nodes.
+            key_files = [PathMaker.key_file(i) for i in range(len(hosts))]
+            dbs = [PathMaker.db_path(i) for i in range(len(hosts))]
+            node_logs = [PathMaker.node_log_file(i) for i in range(len(hosts))]
+            for host, key_file, db, log_file in zip(hosts, key_files, dbs, node_logs):
+                cmd = CommandMaker.run_node(
+                    key_file,
+                    PathMaker.committee_file(),
+                    db,
+                    PathMaker.parameters_file(),
+                    self.settings.request_port,
+                    PathMaker.register_file(),
+                    self.mode,
+                    debug=debug
+                )
+                self._background_run(host, cmd, log_file)
 
-        # Wait for the nodes to synchronize
-        Print.info('Waiting for the nodes to synchronize...')
-        sleep(2 * node_parameters.timeout_delay / 1000)
+            # Wait for the nodes to synchronize
+            Print.info('Waiting for the nodes to synchronize...')
+            sleep(2 * node_parameters.timeout_delay / 1000)
 
         # Wait for all transactions to be processed.
         duration = bench_parameters.duration
@@ -335,22 +340,23 @@ class Bench:
         progress = progress_bar(hosts, prefix='Downloading logs:')
         for i, host in enumerate(progress):
             c = Connection(host.public, user='ubuntu', connect_kwargs=self.connect)
-            c.get(PathMaker.node_log_file(i), local=PathMaker.node_log_file(i))
             c.get(
                 PathMaker.client_log_file(i), local=PathMaker.client_log_file(i)
             )
+            if self.mode not in ['movevm']:
+                c.get(PathMaker.node_log_file(i), local=PathMaker.node_log_file(i))
 
-    def _logs(self, hosts, faults):
+    def _logs(self, hosts, faults, nb_accounts):
         
         self._get_logs(hosts)
 
         # Parse logs and return the parser.
         Print.info('Parsing logs and computing performance...')
-        return LogParser.process(PathMaker.logs_path(), faults=faults)
+        return LogParser.process(PathMaker.logs_path(), faults=faults, nb_accounts=nb_accounts)
 
-    def run(self, bench_parameters_dict, node_parameters_dict, mode, debug=False):
+    def run(self, bench_parameters_dict, node_parameters_dict, debug=False):
         assert isinstance(debug, bool)
-        Print.heading(f'Starting remote benchmark of {mode}')
+        Print.heading(f'Starting remote benchmark of {self.mode}')
         try:
             bench_parameters = BenchParameters(bench_parameters_dict)
             node_parameters = NodeParameters(node_parameters_dict)
@@ -397,10 +403,10 @@ class Bench:
                     Print.heading(f'Run {i+1}/{bench_parameters.runs}')
                     try:
                         self._run_single(
-                            hosts, r, bench_parameters, node_parameters, mode, debug
+                            hosts, r, bench_parameters, node_parameters, debug
                         )
-                        self._logs(hosts, faults).print(PathMaker.result_file(
-                            faults, n, r, bench_parameters.tx_size, mode
+                        self._logs(hosts, faults, n).print(PathMaker.result_file(
+                            faults, n, r, bench_parameters.tx_size, self.mode, self.instance_type
                         ))
                     except (subprocess.SubprocessError, GroupException, ParseError) as e:
                         self.kill(hosts=hosts)

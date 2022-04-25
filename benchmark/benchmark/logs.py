@@ -5,23 +5,28 @@ from os.path import join
 from re import findall, search
 from socket import timeout
 from statistics import mean
-import time
+import uuid
+import subprocess
+from benchmark.commands import CommandMaker
 
-from benchmark.utils import Print
+from benchmark.utils import Print, PathMaker
 
 
 class ParseError(Exception):
     pass
 
 class LogParser:
-    def __init__(self, clients, nodes, faults):
+    def __init__(self, clients, nodes, faults, nb_accounts):
         inputs = [clients, nodes]
         assert all(isinstance(x, list) for x in inputs)
         assert all(isinstance(x, str) for y in inputs for x in y)
         assert clients
 
         self.faults = faults
-        if isinstance(faults, int):
+        self.warn = False
+        if len(nodes) == 0:
+            self.committee_size = nb_accounts
+        elif isinstance(faults, int):
             self.committee_size = len(nodes) + int(faults)
         else:
             self.committee_size = '?'
@@ -43,6 +48,9 @@ class LogParser:
         self.duration = self.end - self.start
         self.start_str = datetime.fromtimestamp(self.start).strftime('%d-%m-%Y %H:%M:%S')
         self.end_str = datetime.fromtimestamp(self.end).strftime('%d-%m-%Y %H:%M:%S')
+        self.misses_str = ''
+        self.timeouts_str = ''
+        self.crypto_channel_str = ''
         
         self.sent = {
             'consensus': consensus_samples,
@@ -55,9 +63,9 @@ class LogParser:
         self.received = { 'move': move_commits }
 
         # Check whether clients missed their target rate.
-        self.misses_str = ''
         msg = f'Clients missed their target rate {self.misses:,} time(s)'
         if self.misses != 0:
+            self.warn = True
             Print.warn(msg)
             self.misses_str = f' {msg}\n'
 
@@ -102,15 +110,15 @@ class LogParser:
             self.timeouts = max(timeouts)
             # Check whether the nodes timed out.
             # Note that nodes are expected to time out once at the beginning.
-            self.timeouts_str = ''
             msg = f'Nodes timed out {self.timeouts:,} time(s)'
             if self.timeouts > 2:
+                self.warn = True
                 Print.warn(msg)
                 self.timeouts_str = f' {msg}\n'
 
-            self.crypto_channel_str = ''
             msg = f'CryptoVerifier waited on receiver {self.crypto_channel_full:,} time(s)'
             if self.crypto_channel_full != 0:
+                self.warn = True
                 Print.warn(msg)
                 self.crypto_channel_str = f' {msg}\n'
 
@@ -417,11 +425,7 @@ class LogParser:
                 ' + CONFIG:\n'
                 f' Faults: {self.faults} nodes\n'
                 f' Committee size: {self.committee_size} nodes\n'
-                f' Input rate: {sum(self.rate):,} tx/s\n'
                 f' Transaction size: {self.tx_size[0]:,} B\n'
-                f' Benchmark start: {self.start_str}\n'
-                f' Benchmark end:   {self.end_str}\n'
-                f' Execution time: {round(self.duration):,} s\n'
                 '\n'
                 f' Consensus timeout delay: {consensus_timeout_delay:,} ms\n'
                 f' Consensus sync retry delay: {consensus_sync_retry_delay:,} ms\n'
@@ -431,6 +435,7 @@ class LogParser:
                 f' Mempool batch size: {mempool_batch_size:,} B\n'
                 f' Mempool max batch delay: {mempool_max_batch_delay:,} ms\n'
                 '\n'
+                '-----------------------------------------\n'
             )
         return config_str
 
@@ -465,27 +470,41 @@ class LogParser:
             movevm_tps = self._move_throughput()
             movevm_latency = self._move_latency() * 1000
             move_str = (
-                f' Number of accounts: {self.committee_size}\n'
                 f' MoveVM TPS: {round(movevm_tps):,} tx/s\n'
                 f' MoveVM latency: {round(movevm_latency):,} ms\n'
             )
         return move_str
 
-    def result(self):
+    def _warn(self):
+        if self.warn:
+            return (
+                ' + WARN:\n'
+                f'{self.misses_str}'
+                f'{self.timeouts_str}'
+                f'{self.crypto_channel_str}'
+                '-----------------------------------------\n'
+            )
+        return ''
+
+    def result(self, uid=''):
+        # TODOTODO Things to add to log results:
+        # - movevm duration split (c.f. MoveNode)
 
         return (
             '\n'
             '-----------------------------------------\n'
-            f' SUMMARY: {self.mode[0]}\n'
+            f' SUMMARY: {self.mode[0]} {uid}\n'
             '-----------------------------------------\n'
             f'{self._consensus_config()}'
-            '-----------------------------------------\n'
             ' + INFO:\n'
+            f' Input rate: {sum(self.rate):,} tx/s\n'
             f' Number of cores: {self.cores[0]}\n'
-            f'{self.misses_str}'
-            f'{self.timeouts_str}'
-            f'{self.crypto_channel_str}'
+            f' Benchmark start: {self.start_str}\n'
+            f' Benchmark end:   {self.end_str}\n'
+            f' Execution time: {round(self.duration):,} s\n'
+            f' Number of accounts: {self.committee_size}\n'
             '-----------------------------------------\n'
+            f'{self._warn()}'
             ' + RESULTS:\n'
             f'{self._consensus_result()}'
             f'{self._currency_result()}'
@@ -495,11 +514,26 @@ class LogParser:
 
     def print(self, filename):
         assert isinstance(filename, str)
+        
+        uid = uuid.uuid4().hex
+        tmp = filename.replace('results/', '')
+        params = tmp.replace('.txt', '')
+        path = PathMaker.save_path(params, uid)
+
+        Print.info(f'Saving to {path}/...')
+        cmd = CommandMaker.save_logs(params, uid)
+        subprocess.run([cmd], shell=True)
+
+        result = self.result(uid)
+        with open(f'{path}/result.txt', 'a') as f:
+            f.write(result)
+
+        Print.info(f'Saving to {filename}...')
         with open(filename, 'a') as f:
-            f.write(self.result())
+            f.write(result)
 
     @classmethod
-    def process(cls, directory, faults):
+    def process(cls, directory, faults, nb_accounts = '?'):
         assert isinstance(directory, str)
 
         clients = []
@@ -511,4 +545,4 @@ class LogParser:
             with open(filename, 'r') as f:
                 nodes += [f.read()]
 
-        return cls(clients, nodes, faults)
+        return cls(clients, nodes, faults, nb_accounts)

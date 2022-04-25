@@ -132,20 +132,14 @@ def remote(ctx, mode='hotmove'):
             'max_batch_delay': 100
         }
     }
-    # if mode not in ['hotstuff', 'hotcrypto', 'hotmove', 'movevm']:
-    #     print('Unknown mode')
-    #     return
+    if mode not in ['hotstuff', 'hotcrypto', 'hotmove', 'movevm']:
+        print('Unknown mode')
+        return
 
-    # try:
-    #     Bench(ctx).run(bench_params, node_params, mode, debug=False)
-    # except BenchError as e:
-    #     Print.error(e)
-
-    for mode in ['hotstuff', 'hotcrypto', 'hotmove', 'movevm']:
-        try:
-            Bench(ctx).run(bench_params, node_params, mode, debug=False)
-        except BenchError as e:
-            Print.error(e)
+    try:
+        Bench(ctx, mode).run(bench_params, node_params, debug=False)
+    except BenchError as e:
+        Print.error(e)
 
 @task
 def plot(ctx):

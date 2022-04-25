@@ -45,6 +45,10 @@ class PathMaker:
         return 'logs'
 
     @staticmethod
+    def save_path(params, uid):
+        return f'{PathMaker.results_path()}/saved/{params}/{uid}'
+
+    @staticmethod
     def node_log_file(i):
         assert isinstance(i, int) and i >= 0
         return join(PathMaker.logs_path(), f'node-{i}.log')
@@ -59,10 +63,10 @@ class PathMaker:
         return 'results'
 
     @staticmethod
-    def result_file(faults, nodes, rate, tx_size, mode):
+    def result_file(faults, nodes, rate, tx_size, mode, instance):
         return join(
             PathMaker.results_path(), 
-            f'bench-{mode}-{faults}-{nodes}-{rate}-{tx_size}.txt'
+            f'bench-{mode}-{faults}-{nodes}-{rate}-{tx_size}-{instance}.txt'
         )
 
     @staticmethod

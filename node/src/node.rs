@@ -9,7 +9,7 @@ use crypto::{SignatureService, Digest};
 use log::{info, warn};
 use mempool::{MempoolMessage, Mempool};
 use store::Store;
-use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::mpsc::{channel, Receiver, Sender, error::TrySendError};
 
 use network::{MessageHandler, Receiver as NetworkReceiver, Writer};
 use async_trait::async_trait;
@@ -296,6 +296,7 @@ impl Node {
                 let (dest, amount) = self.get_arguments(&tx.args).unwrap();
                 self.transfer(tx.source.address, dest, amount);
             }
+
             Mode::HotMove => {
                 let signer = MoveValue::Signer(tx.source.address);
                 let mut tx_args: Vec<MoveValue> = tx.args.iter()
@@ -378,6 +379,8 @@ impl CryptoVerifier {
     }
 
     async fn verify_blocks(mut self) {
+        let mut counter = 0;
+        let limit = 100;
         while let Some(block) = self.to_verify.recv().await {
             let mut verified_block = Vec::with_capacity(block.payload.len());
 
@@ -387,7 +390,21 @@ impl CryptoVerifier {
                 verified_block.push((digest.clone(), verified));
             }
     
-            self.verified.send(verified_block).await;
+            match self.verified.try_send(verified_block) {
+                Ok(_) => (),
+                Err(TrySendError::Full(retry)) => {
+                    counter += 1;
+                    if counter % limit == 0 {
+                        warn!("Channel reached capacity {} times", counter);
+                    }
+
+                    self.verified.send(retry).await;
+                }
+                Err(TrySendError::Closed(_)) => {
+                    warn!("Channel closed by receiver");
+                    return;
+                }
+            }
         }
     }
 

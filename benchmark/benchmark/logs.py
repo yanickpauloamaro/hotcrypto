@@ -55,10 +55,12 @@ class LogParser:
         self.received = { 'move': move_commits }
 
         # Check whether clients missed their target rate.
+        self.misses_str = ''
+        msg = f'Clients missed their target rate {self.misses:,} time(s)'
         if self.misses != 0:
-            Print.warn(
-                f'Clients missed their target rate {self.misses:,} time(s)'
-            )
+            Print.warn(msg)
+            self.misses_str = f' {msg}\n'
+
 
         # Don't parse nodes for MoveVM benchmark (there are none)
         if self.mode[0] != 'MoveVM':
@@ -70,8 +72,10 @@ class LogParser:
                 raise ParseError(f'Failed to parse node logs: {e}')
             consensus_proposals, consensus_commits, consensus_sizes, \
             timeouts, self.configs, consensus_received, \
-            currency_received, currency_commits, crypto_sizes, currency_sizes = zip(*results)
+            currency_received, currency_commits, crypto_sizes, \
+            currency_sizes, crypto_channel_full = zip(*results)
             
+            self.crypto_channel_full = sum(crypto_channel_full)
             self.proposals = self._merge_results([x.items() for x in consensus_proposals])
             self.received = {
                 'consensus': consensus_received,
@@ -98,8 +102,17 @@ class LogParser:
             self.timeouts = max(timeouts)
             # Check whether the nodes timed out.
             # Note that nodes are expected to time out once at the beginning.
+            self.timeouts_str = ''
+            msg = f'Nodes timed out {self.timeouts:,} time(s)'
             if self.timeouts > 2:
-                Print.warn(f'Nodes timed out {self.timeouts:,} time(s)')
+                Print.warn(msg)
+                self.timeouts_str = f' {msg}\n'
+
+            self.crypto_channel_str = ''
+            msg = f'CryptoVerifier waited on receiver {self.crypto_channel_full:,} time(s)'
+            if self.crypto_channel_full != 0:
+                Print.warn(msg)
+                self.crypto_channel_str = f' {msg}\n'
 
     def _merge_results(self, input):
         # Keep the earliest timestamp.
@@ -230,6 +243,10 @@ class LogParser:
         tmp = findall(r'\[(.*Z) .* Verified sample transaction (\d+) from (.*)', log)
         received = {(int(s), c): self._to_posix(t) for t, s, c in tmp}
 
+        tmp = findall(r'\[.* WARN .* Channel reached capacity (\d+) times', log)
+        tmp += [0] # Ensure tmp is not empty
+        crypto_channel_full = max([int(count) for count in tmp])
+
         tmp = findall(r'\[(.*Z) .* Processed sample transaction (\d+) from (.*)', log)
         commits = {(int(s), c): self._to_posix(t) for t, s, c in tmp}
         
@@ -240,7 +257,7 @@ class LogParser:
         currency_tmp = [(d, (self._to_posix(ts), int(s))) for ts, d, s, tpe in tmp if tpe == 'currency']
         currency_sizes = self._merge_currency_results([currency_tmp])
 
-        return received, commits, crypto_sizes, currency_sizes
+        return received, commits, crypto_sizes, currency_sizes, crypto_channel_full
 
     def _parse_nodes(self, log):
         if search(r'panic', log) is not None:
@@ -249,11 +266,13 @@ class LogParser:
         consensus_proposals, consensus_commits, consensus_sizes,  consensus_timeouts, \
             consensus_configs, consensus_received = self._parse_consensus_node(log)
 
-        currency_received, currency_commits, crypto_sizes, currency_sizes = self._parse_currency_node(log)
+        currency_received, currency_commits, crypto_sizes, \
+            currency_sizes, crypto_channel_full = self._parse_currency_node(log)
 
         return consensus_proposals, consensus_commits, consensus_sizes, \
             consensus_timeouts, consensus_configs, consensus_received, \
-            currency_received, currency_commits, crypto_sizes, currency_sizes
+            currency_received, currency_commits, \
+            crypto_sizes, currency_sizes, crypto_channel_full
 
     def _to_posix(self, string):
         x = datetime.fromisoformat(string.replace('Z', '+00:00'))
@@ -318,8 +337,10 @@ class LogParser:
         if not self.commits[mode]:
             return 0, 0, 0
 
-        start, end = self.start, max(self.commits[mode].values())
-        duration = end - start
+        # start, end = self.start, max(self.commits[mode].values())
+        # duration = end - start
+        # TODOTODO the other version gives weird results during high contention
+        duration = self.duration
 
         nb_tx = sum(self.sizes[mode].values())
         tps = nb_tx / duration
@@ -461,6 +482,9 @@ class LogParser:
             '-----------------------------------------\n'
             ' + INFO:\n'
             f' Number of cores: {self.cores[0]}\n'
+            f'{self.misses_str}'
+            f'{self.timeouts_str}'
+            f'{self.crypto_channel_str}'
             '-----------------------------------------\n'
             ' + RESULTS:\n'
             f'{self._consensus_result()}'

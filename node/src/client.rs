@@ -152,7 +152,9 @@ async fn run<'a>(matches: &ArgMatches<'_>) -> Result<()> {
     info!("Transactions size: {} B", client.transaction_size());
     info!("Transactions rate: {} tx/s", rate);
 
-    benchmark(client, rate, duration).await
+    benchmark(client, rate, duration).await.expect("Benchmark failed");
+
+    Ok(())
 }
 
 // ------------------------------------------------------------------------
@@ -209,8 +211,7 @@ async fn benchmark(mut client: ClientWrapper, rate: u64, duration: u64) -> Resul
         counter += 1;
     }
 
-    client.conclude().await;
-    Ok(())
+    client.conclude().await
 }
 
 type LocalMsg = (Vec<MoveValue>, bool);
@@ -594,7 +595,7 @@ impl MoveClient {
 
     pub async fn conclude(self) -> Result<()> {
         info!("Waiting for MoveNode to finish");
-        self.node_handle.await.context("Failed to join MoveNode")
+        self.node_handle.await.context("Failed to wait for MoveNode")
     }
 }
 
@@ -663,51 +664,58 @@ impl MoveNode {
             .expect("Unable create script")
             .transaction_payload();
         
-        info!("Start processing transactions");
-        let start = Instant::now();
         let mut nonce: u128 = 0;
         let mut new_session_acc: Duration = Duration::ZERO;
         let mut execute_script_acc: Duration = Duration::ZERO;
         let mut finish_session_acc: Duration = Duration::ZERO;
         let mut apply_changeset_acc: Duration = Duration::ZERO;
 
-        while let Some((args, is_sample)) = self.tx_receive.recv().await {
+        info!("Start processing transactions");
+        let start = Instant::now();
+        let mut timer = interval(Duration::from_secs(duration));
+        tokio::pin!(timer);
+        timer.tick().await; // Interval ticks immediately
 
-            let mut chrono = Instant::now();
-            let mut sess = self.vm.new_session(&self.storage);
-            lap!(chrono, new_session_acc);
+        loop {
+            tokio::select! {
+                s = timer.tick() => {
+                    info!("Move Node: Reached end of benchmark");
+                    break;
+                }
+                Some((args, is_sample)) = self.tx_receive.recv() => {
 
-            sess.execute_script(
-                script.clone(),
-                vec![],
-                args.iter()
-                    .map(|arg| arg.simple_serialize().unwrap())
-                    .collect(),
-                &mut gas_status,
-            )
-            .map(|_| ())
-            .unwrap();
-            lap!(chrono, execute_script_acc);
-    
-            let (changeset, _) = sess
-                .finish()
-                .unwrap();
-            lap!(chrono, finish_session_acc);
+                    let mut chrono = Instant::now();
+                    let mut sess = self.vm.new_session(&self.storage);
+                    lap!(chrono, new_session_acc);
+        
+                    sess.execute_script(
+                        script.clone(),
+                        vec![],
+                        args.iter()
+                            .map(|arg| arg.simple_serialize().unwrap())
+                            .collect(),
+                        &mut gas_status,
+                    )
+                    .map(|_| ())
+                    .unwrap();
+                    lap!(chrono, execute_script_acc);
+            
+                    let (changeset, _) = sess
+                        .finish()
+                        .unwrap();
+                    lap!(chrono, finish_session_acc);
+        
+                    self.storage.apply(changeset).unwrap();
+                    lap!(chrono, apply_changeset_acc);
+            
+                    if is_sample {
+                        // NOTE: This log entry is used to compute performance.
+                        info!("Processed sample input {}", nonce);
+                    }
 
-            self.storage.apply(changeset).unwrap();
-            lap!(chrono, apply_changeset_acc);
-    
-            if is_sample {
-                // NOTE: This log entry is used to compute performance.
-                info!("Processed sample input {}", nonce);
+                    nonce += 1;
+                }
             }
-    
-            if start.elapsed().as_millis() > (duration * 1000) as u128 {
-                // TODOTODO output durée de chaque partie en ms
-                info!("Move Node: Reached end of benchmark");
-                break;
-            }
-            nonce += 1;
         }
         
         info!("Stop processing transactions");

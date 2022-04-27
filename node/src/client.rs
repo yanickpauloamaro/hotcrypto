@@ -12,6 +12,7 @@ use crate::transaction::*;
 use crate::utils::*;
 
 use anyhow::{Context, Result};
+use async_trait::async_trait;
 use bytes::{Bytes, BytesMut};
 use bytes::BufMut as _;
 use clap::{crate_name, crate_version, App, AppSettings, SubCommand, ArgMatches};
@@ -24,8 +25,10 @@ use rand::{
     rngs::ThreadRng,
     seq::SliceRandom,
 };
+use std::cmp::max;
 use std::net::SocketAddr;
 use tokio::sync::mpsc::{Sender, Receiver, channel};
+use tokio::task::JoinHandle;
 use tokio::time::{interval, sleep, Duration, Instant};
 
 use move_core_types::{
@@ -37,6 +40,13 @@ use move_vm_test_utils::InMemoryStorage;
 use move_vm_types::gas_schedule::GasStatus;
 
 extern crate num_cpus;
+
+macro_rules! lap {
+    ( $chrono:expr, $acc:expr ) => {
+        $acc = $acc.saturating_add($chrono.elapsed());
+        $chrono = Instant::now();
+    };
+}
 
 #[tokio::main]
 async fn main() {
@@ -128,25 +138,25 @@ async fn run<'a>(matches: &ArgMatches<'_>) -> Result<()> {
 
     info!("Creating {} client", matches.subcommand().0);
 
-    let boxed: Box<dyn Client> = match matches.subcommand() {
-        ("hotstuff", Some(subm)) =>     HotStuffClient::from(subm, timeout).await?,
-        ("hotcrypto", Some(subm)) =>    CryptoClient::<HotCrypto>::from(subm, timeout, HotCrypto{}).await?,
-        ("hotmove", Some(subm)) =>      CryptoClient::<HotMove>::from(subm, timeout, HotMove::new()?).await?,
-        ("movevm", Some(subm)) =>       MoveClient::from(subm, timeout, rate, duration).await?,
+    let client: ClientWrapper = match matches.subcommand() {
+        ("hotstuff", Some(subm)) =>     ClientWrapper::HotStuff(HotStuffClient::from(subm, timeout).await?),
+        ("hotcrypto", Some(subm)) =>    ClientWrapper::HotCrypto(CryptoClient::<HotCrypto>::from(subm, timeout, HotCrypto{}).await?),
+        ("hotmove", Some(subm)) =>      ClientWrapper::HotMove(CryptoClient::<HotMove>::from(subm, timeout, HotMove::new()?).await?),
+        ("movevm", Some(subm)) =>       ClientWrapper::MoveVM(MoveClient::from(subm, timeout, rate, duration).await?),
         _ => unreachable!()
     };
 
     let cores = num_cpus::get();
-    info!("Benchmarking {}", boxed.to_string());
+    info!("Benchmarking {}", client.to_string());
     info!("Number of cores: {}", cores);
-    info!("Transactions size: {} B", boxed.transaction_size());
+    info!("Transactions size: {} B", client.transaction_size());
     info!("Transactions rate: {} tx/s", rate);
 
-    benchmark(boxed, rate, duration).await
+    benchmark(client, rate, duration).await
 }
 
 // ------------------------------------------------------------------------
-async fn benchmark(mut client: Box<dyn Client>, rate: u64, duration: u64) -> Result<()> {
+async fn benchmark(mut client: ClientWrapper, rate: u64, duration: u64) -> Result<()> {
 
     const PRECISION: u64 = 20; // Sample precision.
     const BURST_DURATION: u64 = 1000 / PRECISION;
@@ -199,6 +209,7 @@ async fn benchmark(mut client: Box<dyn Client>, rate: u64, duration: u64) -> Res
         counter += 1;
     }
 
+    client.conclude().await;
     Ok(())
 }
 
@@ -208,8 +219,52 @@ pub enum Wrapper<'a> {
     Remote(&'a mut Transport, bytes::Bytes)
 }
 
+enum ClientWrapper {
+    HotStuff(HotStuffClient),
+    HotCrypto(CryptoClient::<HotCrypto>),
+    HotMove(CryptoClient::<HotMove>),
+    MoveVM(MoveClient),
+}
+
+impl ClientWrapper {
+    fn send(&mut self, is_sample: bool, nonce: u64, counter: u64) -> Wrapper {
+        match self {
+            ClientWrapper::HotStuff(client) => client.send(is_sample, nonce, counter),
+            ClientWrapper::HotCrypto(client) => client.send(is_sample, nonce, counter),
+            ClientWrapper::HotMove(client) => client.send(is_sample, nonce, counter),
+            ClientWrapper::MoveVM(client) => client.send(is_sample, nonce, counter),
+        }
+    }
+
+    fn transaction_size(&self) -> usize {
+        match self {
+            ClientWrapper::HotStuff(client) => client.transaction_size(),
+            ClientWrapper::HotCrypto(client) => client.transaction_size(),
+            ClientWrapper::HotMove(client) => client.transaction_size(),
+            ClientWrapper::MoveVM(client) => client.transaction_size(),
+        }
+    }
+
+    fn to_string(&self) -> String {
+        match self {
+            ClientWrapper::HotStuff(client) => client.to_string(),
+            ClientWrapper::HotCrypto(client) => client.to_string(),
+            ClientWrapper::HotMove(client) => client.to_string(),
+            ClientWrapper::MoveVM(client) => client.to_string(),
+        }
+    }
+
+    async fn conclude(self) -> Result<()> {
+        match self {
+            ClientWrapper::MoveVM(client) => client.conclude().await,
+            _ => Ok(())
+        }
+    }
+}
+
 // ------------------------------------------------------------------------
-pub trait Client {
+
+pub trait ClientTrait {
     fn send(&mut self, is_sample: bool, nonce: u64, counter: u64) -> Wrapper;
 
     fn transaction_size(&self) -> usize;
@@ -245,7 +300,7 @@ impl HotStuffClient {
         Ok(client)
     }
 
-    pub async fn from(matches: &ArgMatches<'_>, timeout: u64) -> Result<Box<dyn Client>> {
+    pub async fn from(matches: &ArgMatches<'_>, timeout: u64) -> Result<Self> {
         
         let target: SocketAddr = SocketAddr::from_matches(matches)?;
         let nodes: Vec<SocketAddr> = Vec::<SocketAddr>::from_matches(matches)?;
@@ -255,13 +310,12 @@ impl HotStuffClient {
             .unwrap()
             .parse::<usize>()
             .context("The size of transactions must be a non-negative integer")?;
-        
-        let client = Self::new(target, nodes, timeout, size).await?;
-        Ok(Box::new(client))
+            
+        Ok(Self::new(target, nodes, timeout, size).await?)
     }
 }
 
-impl Client for HotStuffClient {
+impl ClientTrait for HotStuffClient {
     fn send(&mut self, is_sample: bool, _nonce: u64, counter: u64) -> Wrapper {
 
         if is_sample {
@@ -391,7 +445,7 @@ impl<T> CryptoClient<T>
         Ok(client)
     }
 
-    pub async fn from(matches: &ArgMatches<'_>, timeout: u64, currency: T) -> Result<Box<CryptoClient<T>>> {
+    pub async fn from(matches: &ArgMatches<'_>, timeout: u64, currency: T) -> Result<CryptoClient<T>> {
         
         let target = SocketAddr::from_matches(matches)?;
         let nodes = Vec::<SocketAddr>::from_matches(matches)?;
@@ -404,8 +458,7 @@ impl<T> CryptoClient<T>
             .filter(|s| *s > 0)
             .expect("There must be at least one other account");
         
-        let client = Self::new(target, nodes, timeout, secret, register, currency).await?;
-        Ok(Box::new(client))
+        Ok(Self::new(target, nodes, timeout, secret, register, currency).await?)
     }
 
     fn transaction(&self, dest: Account, amount: Currency, nonce: u64) -> Transaction {
@@ -435,7 +488,7 @@ impl<T> CryptoClient<T>
     }
 }
 
-impl<T> Client for CryptoClient<T>
+impl<T> ClientTrait for CryptoClient<T>
     where T: CryptoCurrency
 {
     fn send(
@@ -487,6 +540,7 @@ struct MoveClient {
     account: Account,
     register: Register,
     tx_send: Sender<(Vec<MoveValue>, bool)>,
+    node_handle: JoinHandle<()>
 }
 
 impl MoveClient {
@@ -504,10 +558,10 @@ impl MoveClient {
         let (tx_send, tx_receive) = channel(channel_capacity);
         
         let node = MoveNode::new(tx_receive, &register);
-        tokio::spawn(node.receive(duration));
+        let node_handle = tokio::spawn(node.receive(duration));
 
-        info!("Waiting for the node to be ready...");
-        sleep(Duration::from_millis(2 * timeout)).await;
+        // info!("Waiting for the node to be ready...");
+        // sleep(Duration::from_millis(2 * timeout)).await;
         
         // Make sure we don't make transfers to ourself
         register.accounts.retain(|account| account.public_key != secret.name);
@@ -519,13 +573,14 @@ impl MoveClient {
         let client = Self{
             account,
             register,
-            tx_send
+            tx_send,
+            node_handle
         };
         
         Ok(client)
     }
 
-    pub async fn from(matches: &ArgMatches<'_>, timeout: u64, rate: u64, duration: u64) -> Result<Box<dyn Client>> {
+    pub async fn from(matches: &ArgMatches<'_>, timeout: u64, rate: u64, duration: u64) -> Result<Self> {
         
         let secret = Secret::from_matches(matches)?;
         let register = Register::from_matches(matches)?;
@@ -534,12 +589,16 @@ impl MoveClient {
             .filter(|s| *s > 1)
             .expect("There must be at least one other account");
 
-        let client = Self::new(timeout, secret, register, rate, duration).await?;
-        Ok(Box::new(client))
+        Ok(Self::new(timeout, secret, register, rate, duration).await?)
+    }
+
+    pub async fn conclude(self) -> Result<()> {
+        info!("Waiting for MoveNode to finish");
+        self.node_handle.await.context("Failed to join MoveNode")
     }
 }
 
-impl Client for MoveClient {
+impl ClientTrait for MoveClient {
     fn send(&mut self, is_sample: bool, nonce: u64, _counter: u64) -> Wrapper {
 
         let mut amount = NORMAL_TX_AMOUNT;
@@ -606,13 +665,19 @@ impl MoveNode {
         
         info!("Start processing transactions");
         let start = Instant::now();
-        let mut nonce = 0;
+        let mut nonce: u128 = 0;
+        let mut new_session_acc: Duration = Duration::ZERO;
+        let mut execute_script_acc: Duration = Duration::ZERO;
+        let mut finish_session_acc: Duration = Duration::ZERO;
+        let mut apply_changeset_acc: Duration = Duration::ZERO;
 
         while let Some((args, is_sample)) = self.tx_receive.recv().await {
 
-            let s = Instant::now();
+            let mut chrono = Instant::now();
             let mut sess = self.vm.new_session(&self.storage);
-            let err = sess.execute_script(
+            lap!(chrono, new_session_acc);
+
+            sess.execute_script(
                 script.clone(),
                 vec![],
                 args.iter()
@@ -620,36 +685,97 @@ impl MoveNode {
                     .collect(),
                 &mut gas_status,
             )
-            .map(|_| ());
-    
-            // match err {
-            //     Ok(_) => warn!("VM output ok"),
-            //     Err(other) => {
-            //         warn!("VM output: {}", other);
-            //         panic!("VMErr")
-            //     }
-            // };
-    
-            err.unwrap();
+            .map(|_| ())
+            .unwrap();
+            lap!(chrono, execute_script_acc);
     
             let (changeset, _) = sess
                 .finish()
                 .unwrap();
+            lap!(chrono, finish_session_acc);
+
             self.storage.apply(changeset).unwrap();
+            lap!(chrono, apply_changeset_acc);
     
             if is_sample {
                 // NOTE: This log entry is used to compute performance.
-                info!("Processed sample input {} (took {} ms)", nonce, s.elapsed().as_millis());
+                info!("Processed sample input {}", nonce);
             }
     
             if start.elapsed().as_millis() > (duration * 1000) as u128 {
+                // TODOTODO output durée de chaque partie en ms
                 info!("Move Node: Reached end of benchmark");
                 break;
             }
             nonce += 1;
         }
-    
+        
         info!("Stop processing transactions");
+        self.print_stats(
+            nonce,
+            new_session_acc,
+            execute_script_acc,
+            finish_session_acc,
+            apply_changeset_acc
+        );
+    }
+    
+    fn print_stats(
+        &self,
+        nonce: u128,
+        new_session_acc: Duration,
+        execute_script_acc: Duration,
+        finish_session_acc: Duration,
+        apply_changeset_acc: Duration,
+    ) {
+
+        let mut total_duration = Duration::ZERO;
+        total_duration = total_duration.saturating_add(new_session_acc);
+        total_duration = total_duration.saturating_add(execute_script_acc);
+        total_duration = total_duration.saturating_add(finish_session_acc);
+        total_duration = total_duration.saturating_add(apply_changeset_acc);
+        
+        let mut total_width = 0;
+        let mut avg_width = 0;
+
+        let v = vec![
+            new_session_acc,
+            execute_script_acc,
+            finish_session_acc,
+            apply_changeset_acc,
+            total_duration
+        ];
+
+        let mut res = Vec::with_capacity(v.len());
+        for acc in v {
+            let total = acc.as_millis();
+            let avg = acc.as_nanos() / (1000 * nonce);
+            
+            total_width = max(total_width, total.to_string().len());
+            avg_width = max(avg_width, avg.to_string().len());
+            res.push((total, avg));
+        }
+
         info!("MoveVM processed {} inputs", nonce);
+        info!("MoveVM session creation:  total {total:>total_width$} ms, avg {avg:>avg_width$} μs",
+            total = res[0].0, total_width = total_width,
+            avg = res[0].1, avg_width = avg_width,
+        );
+        info!("MoveVM script execution:  total {total:>total_width$} ms, avg {avg:>avg_width$} μs",
+            total = res[1].0, total_width = total_width,
+            avg = res[1].1, avg_width = avg_width,
+        );
+        info!("MoveVM closing session:   total {total:>total_width$} ms, avg {avg:>avg_width$} μs",
+            total = res[2].0, total_width = total_width,
+            avg = res[2].1, avg_width = avg_width,
+        );
+        info!("MoveVM applying changset: total {total:>total_width$} ms, avg {avg:>avg_width$} μs",
+            total = res[3].0, total_width = total_width,
+            avg = res[3].1, avg_width = avg_width,
+        );
+        info!("MoveVM execution time:    total {total:>total_width$} ms, avg {avg:>avg_width$} μs",
+            total = res[4].0, total_width = total_width,
+            avg = res[4].1, avg_width = avg_width,
+        );
     }
 }

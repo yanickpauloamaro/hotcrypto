@@ -167,6 +167,9 @@ class Bench:
 
         # Ensure there are enough hosts.
         hosts = self.manager.hosts()
+        if self.mode == 'movevm':
+            h = [ip[0] for ip in hosts.values()]
+            return h[:1]
         if sum(len(x) for x in hosts.values()) < nodes:
             return []
 
@@ -208,7 +211,7 @@ class Bench:
         g = Group(*public_ips, user='ubuntu', connect_kwargs=self.connect)
         g.run(' && '.join(cmd), hide=True)
 
-    def _config(self, hosts, node_parameters):
+    def _config(self, hosts, nb_accounts, node_parameters):
         Print.info('Generating configuration files...')
 
         # Cleanup all local configuration files.
@@ -233,7 +236,7 @@ class Bench:
 
         # Generate configuration files for clients. ##
         client_keys = []
-        client_key_files = [PathMaker.key_file(i, 'client') for i in range(len(hosts))]
+        client_key_files = [PathMaker.key_file(i, 'client') for i in range(nb_accounts)]
         for filename in client_key_files:
             cmd = CommandMaker.generate_key(filename, 'client').split()
             subprocess.run(cmd, check=True)
@@ -285,6 +288,8 @@ class Bench:
         committee = Committee.load(PathMaker.committee_file())
         addresses = [f'{x.public}:{self.settings.front_port}' for x in hosts]
         rate_share = ceil(rate / committee.size())  # Take faults into account.
+        if self.mode == 'movevm':
+            rate_share = rate
         timeout = node_parameters.timeout_delay
         client_logs = [PathMaker.client_log_file(i) for i in range(len(hosts))]
         client_key_files = [PathMaker.key_file(i, 'client') for i in range(len(hosts))] ##
@@ -302,6 +307,10 @@ class Bench:
                 nodes=addresses,
             )
             self._background_run(host, cmd, log_file)
+
+            if self.mode == 'movevm':
+                # Only run one client for benchmarking MoveVM
+                break
 
         if self.mode not in ['movevm']:
             # Run the nodes.
@@ -388,7 +397,7 @@ class Bench:
 
                 # Upload all configuration files.
                 try:
-                    self._config(hosts, node_parameters)
+                    self._config(hosts, n, node_parameters)
                 except (subprocess.SubprocessError, GroupException) as e:
                     e = FabricError(e) if isinstance(e, GroupException) else e
                     Print.error(BenchError('Failed to configure nodes', e))

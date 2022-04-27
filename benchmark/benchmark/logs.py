@@ -16,30 +16,30 @@ class ParseError(Exception):
     pass
 
 class LogParser:
-    def __init__(self, clients, nodes, faults, nb_accounts):
-        inputs = [clients, nodes]
+    def __init__(self, client_logs, node_logs, faults, nb_accounts):
+        inputs = [client_logs, node_logs]
         assert all(isinstance(x, list) for x in inputs)
         assert all(isinstance(x, str) for y in inputs for x in y)
-        assert clients
+        assert client_logs
 
         self.faults = faults
         self.warn = False
-        if len(nodes) == 0:
+        if len(node_logs) == 0:
             self.committee_size = nb_accounts
         elif isinstance(faults, int):
-            self.committee_size = len(nodes) + int(faults)
+            self.committee_size = len(node_logs) + int(faults)
         else:
             self.committee_size = '?'
 
         # Parse the clients logs.
         try:
             with Pool() as p:
-                results = p.map(self._parse_clients, clients)
+                results = p.map(self._parse_clients, client_logs)
         except (ValueError, IndexError) as e:
             raise ParseError(f'Failed to parse client logs: {e}')
         self.tx_size, self.rate, start, end, misses, self.mode, self.cores, \
             consensus_samples, currency_samples, \
-            move_samples, move_commits, self.move_nb_tx \
+            move_samples, move_commits, self.move_nb_tx, self.move_stats \
             = zip(*results)
         self.misses = sum(misses)
         
@@ -75,7 +75,7 @@ class LogParser:
             # Parse the nodes logs.
             try:
                 with Pool() as p:
-                    results = p.map(self._parse_nodes, nodes)
+                    results = p.map(self._parse_nodes, node_logs)
             except (ValueError, IndexError) as e:
                 raise ParseError(f'Failed to parse node logs: {e}')
             consensus_proposals, consensus_commits, consensus_sizes, \
@@ -162,11 +162,11 @@ class LogParser:
         consensus_samples = self._parse_consensus_client(log)
         currency_samples = self._parse_currency_client(log)
 
-        move_samples, move_commits, move_nb_tx = self._parse_move_client(log)
+        move_samples, move_commits, move_nb_tx, move_stats = self._parse_move_client(log)
         
         return size, rate, start, end, misses, mode, cores, \
             consensus_samples, currency_samples, \
-            move_samples, move_commits, move_nb_tx
+            move_samples, move_commits, move_nb_tx, move_stats
 
     
     def _parse_consensus_client(self, log):
@@ -184,13 +184,30 @@ class LogParser:
         tmp = findall(r'\[(.*Z) .* Sending sample input (\d+) from .*', log)
         move_samples = {int(s): self._to_posix(t) for t, s in tmp}
 
-        tmp = findall(r'\[(.*Z) .* Processed sample input (\d+) \(.*\)', log)
+        tmp = findall(r'\[(.*Z) .* Processed sample input (\d+)', log)
         move_commits = {int(s): self._to_posix(t) for t, s in tmp}
 
         tmp = search(r'\[.*\] MoveVM processed (\d+) inputs', log)
         move_nb_tx = 0 if tmp is None else int(tmp.group(1))
+
+        stats = []
+        tmp = search(r'\[.*\]( MoveVM session creation: .*)', log)
+        stats += [] if tmp is None else [tmp.group(1)]
+
+        tmp = search(r'\[.*\]( MoveVM script execution: .*)', log)
+        stats += [] if tmp is None else [tmp.group(1)]
+
+        tmp = search(r'\[.*\]( MoveVM closing session: .*)', log)
+        stats += [] if tmp is None else [tmp.group(1)]
+
+        tmp = search(r'\[.*\]( MoveVM applying changset: .*)', log)
+        stats += [] if tmp is None else [tmp.group(1)]
+
+        tmp = search(r'\[.*\]( MoveVM execution time: .*)', log)
+        stats += [] if tmp is None else [tmp.group(1)]
+
         
-        return move_samples, move_commits, move_nb_tx
+        return move_samples, move_commits, move_nb_tx, '\n'.join(stats)
 
     def _parse_consensus_node(self, log):
         
@@ -472,6 +489,8 @@ class LogParser:
             move_str = (
                 f' MoveVM TPS: {round(movevm_tps):,} tx/s\n'
                 f' MoveVM latency: {round(movevm_latency):,} ms\n'
+                '\n'
+                f'{self.move_stats[0]}\n'
             )
         return move_str
 
@@ -487,9 +506,6 @@ class LogParser:
         return ''
 
     def result(self, uid=''):
-        # TODOTODO Things to add to log results:
-        # - movevm duration split (c.f. MoveNode)
-
         return (
             '\n'
             '-----------------------------------------\n'
@@ -499,10 +515,10 @@ class LogParser:
             ' + INFO:\n'
             f' Input rate: {sum(self.rate):,} tx/s\n'
             f' Number of cores: {self.cores[0]}\n'
+            f' Number of accounts: {self.committee_size}\n'
+            f' Execution time: {round(self.duration):,} s\n'
             f' Benchmark start: {self.start_str}\n'
             f' Benchmark end:   {self.end_str}\n'
-            f' Execution time: {round(self.duration):,} s\n'
-            f' Number of accounts: {self.committee_size}\n'
             '-----------------------------------------\n'
             f'{self._warn()}'
             ' + RESULTS:\n'

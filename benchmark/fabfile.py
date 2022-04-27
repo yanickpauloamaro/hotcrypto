@@ -181,3 +181,66 @@ def remove(ctx):
         Bench(ctx).remove()
     except BenchError as e:
         Print.error(e)
+
+@task
+def warmupremote(ctx):
+    ''' Run benchmarks on AWS (N nodes across all regions) '''
+    bench_params = {
+        'faults': 0,
+        'tx_size': 128,
+        'nodes': [4],
+        'rate': [10_000],
+        'duration': 30,
+        'runs': 1,
+    }
+
+    node_params = {
+        'consensus': {
+            'timeout_delay': 5_000,
+            'sync_retry_delay': 5_000,
+        },
+        'mempool': {
+            'gc_depth': 50,
+            'sync_retry_delay': 5_000,
+            'sync_retry_nodes': 3,
+            'batch_size': 500_000,
+            'max_batch_delay': 100
+        }
+    }
+
+    for mode in ['hotstuff', 'hotcrypto', 'hotmove', 'movevm']:
+        try:
+            Bench(ctx, mode).run(bench_params, node_params, debug=False, warmup=True)
+        except BenchError as e:
+            Print.error(e)
+
+@task
+def warmuplocal(ctx):
+    ''' Run benchmarks on localhost '''
+    bench_params = {
+        'faults': 0,
+        'nodes': 2,
+        'rate': 10_000,
+        'tx_size': 128,
+        'duration': 10,
+    }
+    node_params = {
+        'consensus': {
+            'timeout_delay': 1_000,
+            'sync_retry_delay': 10_000,
+        },
+        'mempool': {
+            'gc_depth': 50,
+            'sync_retry_delay': 5_000,
+            'sync_retry_nodes': 3,
+            'batch_size': 15_000,
+            'max_batch_delay': 10
+        }
+    }
+
+    for mode in ['hotstuff', 'hotcrypto', 'hotmove', 'movevm']:
+        try:
+            ret = LocalBench(bench_params, node_params).run(mode, debug=False).result()
+            print(ret)
+        except BenchError as e:
+            Print.error(e)

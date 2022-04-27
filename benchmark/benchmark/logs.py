@@ -540,22 +540,25 @@ class LogParser:
             '-----------------------------------------\n'
         )
 
-    def print(self, filename):
+    def print(self, filename, debug=False):
         assert isinstance(filename, str)
-        
+
+        # Save logs and results
         uid = uuid.uuid4().hex
         tmp = filename.replace('results/', '')
         params = tmp.replace('.txt', '')
-        path = PathMaker.save_path(params, uid)
+        path = PathMaker.save_path(params, uid, debug)
 
         Print.info(f'Saving to {path}/...')
-        cmd = CommandMaker.save_logs(params, uid)
+        cmd = CommandMaker.save_logs(params, uid, debug)
         subprocess.run([cmd], shell=True)
 
         result = self.result(uid)
         with open(f'{path}/result.txt', 'a') as f:
             f.write(result)
 
+        if debug:
+            filename = f'{PathMaker.debug_path()}/{tmp}'
         Print.info(f'Saving to {filename}...')
         with open(filename, 'a') as f:
             f.write(result)

@@ -31,7 +31,7 @@ class ExecutionError(Exception):
 
 
 class Bench:
-    def __init__(self, ctx, mode):
+    def __init__(self, ctx, mode='hotstuff'):
         self.manager = InstanceManager.make()
         self.settings = self.manager.settings
 
@@ -338,6 +338,8 @@ class Bench:
         duration = bench_parameters.duration
         for _ in progress_bar(range(20), prefix=f'Running benchmark ({duration} sec):'):
             sleep(ceil(duration / 20))
+        
+        sleep(2) # Make sure the clients have time to stop on their own
         self.kill(hosts=hosts, delete_logs=False)
 
     def _get_logs(self, hosts):
@@ -363,7 +365,7 @@ class Bench:
         Print.info('Parsing logs and computing performance...')
         return LogParser.process(PathMaker.logs_path(), faults=faults, nb_accounts=nb_accounts)
 
-    def run(self, bench_parameters_dict, node_parameters_dict, debug=False):
+    def run(self, bench_parameters_dict, node_parameters_dict, debug=False, warmup=False):
         assert isinstance(debug, bool)
         Print.heading(f'Starting remote benchmark of {self.mode}')
         try:
@@ -416,7 +418,7 @@ class Bench:
                         )
                         self._logs(hosts, faults, n).print(PathMaker.result_file(
                             faults, n, r, bench_parameters.tx_size, self.mode, self.instance_type
-                        ))
+                        ), debug or warmup)
                     except (subprocess.SubprocessError, GroupException, ParseError) as e:
                         self.kill(hosts=hosts)
                         if isinstance(e, GroupException):

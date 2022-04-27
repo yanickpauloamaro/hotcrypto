@@ -45,8 +45,13 @@ class PathMaker:
         return 'logs'
 
     @staticmethod
-    def save_path(params, uid):
-        return f'{PathMaker.results_path()}/saved/{params}/{uid}'
+    def debug_path():
+        return 'debug'
+
+    @staticmethod
+    def save_path(params, uid, debug=False):
+        dir = f'{PathMaker.debug_path()}' if debug else 'saved'
+        return f'{dir}/{params}/{uid}'
 
     @staticmethod
     def node_log_file(i):

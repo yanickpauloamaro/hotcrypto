@@ -16,10 +16,10 @@ class CommandMaker:
         return f'rm -r {PathMaker.logs_path()} ; mkdir -p {PathMaker.logs_path()}'
     
     @staticmethod
-    def save_logs(params, uid):
+    def save_logs(params, uid, debug=False):
         return (
-            f'mkdir -p {PathMaker.save_path(params, uid)} ; '
-            f'cp -r logs/*.log {PathMaker.save_path(params, uid)}/'
+            f'mkdir -p {PathMaker.save_path(params, uid, debug)} ; '
+            f'cp -r logs/*.log {PathMaker.save_path(params, uid, debug)}/'
         )
 
     @staticmethod

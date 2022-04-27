@@ -137,12 +137,12 @@ class LocalBench:
             for _ in progress_bar(range(20), prefix=f'Running benchmark ({self.duration} sec):'):
                 sleep(ceil(self.duration / 20))
 
-            sleep(2) # Make sure the clients stopped
+            sleep(2) # Make sure the clients have time to stop on their own
             self._kill_nodes()
 
             # Parse logs and return the parser.
             Print.info('Parsing logs...')
-            return LogParser.process('./logs', faults=self.faults)
+            return LogParser.process('./logs', faults=self.faults, nb_accounts=nodes)
 
         except (subprocess.SubprocessError, ParseError) as e:
             self._kill_nodes()

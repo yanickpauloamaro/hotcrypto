@@ -17,7 +17,7 @@ use network::SimpleSender;
 use std::cmp::max;
 use std::collections::VecDeque;
 use store::Store;
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::mpsc::{Receiver, Sender, error::TrySendError};
 
 #[cfg(test)]
 #[path = "tests/core_tests.rs"]
@@ -42,6 +42,8 @@ pub struct Core {
     timer: Timer,
     aggregator: Aggregator,
     network: SimpleSender,
+    counter: u128,
+    limit: u128,
 }
 
 impl Core {
@@ -80,6 +82,8 @@ impl Core {
                 timer: Timer::new(timeout_delay),
                 aggregator: Aggregator::new(committee),
                 network: SimpleSender::new(),
+                counter: 0,
+                limit: 100,
             }
             .run()
             .await
@@ -149,8 +153,19 @@ impl Core {
                 }
             }
             debug!("Committed {:?}", block);
-            if let Err(e) = self.tx_commit.send(block).await {
-                warn!("Failed to send block through the commit channel: {}", e);
+            match self.tx_commit.try_send(block) {
+                Ok(_) => (),
+                Err(TrySendError::Full(retry)) => {
+                    self.counter += 1;
+                    if self.counter % self.limit == 0 {
+                        warn!("Consensus commit channel reached capacity {} times", self.counter);
+                    }
+
+                    if let Err(e) = self.tx_commit.send(retry).await {
+                        warn!("Failed to send block through the commit channel: {}", e);
+                    }
+                }
+                Err(e) => warn!("Failed to send block through the commit channel: {}", e)
             }
         }
         Ok(())

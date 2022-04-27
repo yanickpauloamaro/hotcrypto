@@ -395,7 +395,7 @@ impl CryptoVerifier {
                 Err(TrySendError::Full(retry)) => {
                     counter += 1;
                     if counter % limit == 0 {
-                        warn!("Channel reached capacity {} times", counter);
+                        warn!("Crypto output channel reached capacity {} times", counter);
                     }
 
                     self.verified.send(retry).await;

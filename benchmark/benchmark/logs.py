@@ -51,6 +51,7 @@ class LogParser:
         self.misses_str = ''
         self.timeouts_str = ''
         self.crypto_channel_str = ''
+        self.consensus_channel_str = ''
         
         self.sent = {
             'consensus': consensus_samples,
@@ -69,7 +70,6 @@ class LogParser:
             Print.warn(msg)
             self.misses_str = f' {msg}\n'
 
-
         # Don't parse nodes for MoveVM benchmark (there are none)
         if self.mode[0] != 'MoveVM':
             # Parse the nodes logs.
@@ -81,9 +81,10 @@ class LogParser:
             consensus_proposals, consensus_commits, consensus_sizes, \
             timeouts, self.configs, consensus_received, \
             currency_received, currency_commits, crypto_sizes, \
-            currency_sizes, crypto_channel_full = zip(*results)
+            currency_sizes, consensus_channel_full, crypto_channel_full = zip(*results)
             
             self.crypto_channel_full = sum(crypto_channel_full)
+            self.consensus_channel_full = sum(consensus_channel_full)
             self.proposals = self._merge_results([x.items() for x in consensus_proposals])
             self.received = {
                 'consensus': consensus_received,
@@ -116,7 +117,13 @@ class LogParser:
                 Print.warn(msg)
                 self.timeouts_str = f' {msg}\n'
 
-            msg = f'CryptoVerifier waited on receiver {self.crypto_channel_full:,} time(s)'
+            msg = f'Consensus waited on Crypto {self.consensus_channel_full:,} time(s)'
+            if self.consensus_channel_full != 0:
+                self.warn = True
+                Print.warn(msg)
+                self.consensus_channel_str = f' {msg}\n'
+            
+            msg = f'Crypto waited on Currency {self.crypto_channel_full:,} time(s)'
             if self.crypto_channel_full != 0:
                 self.warn = True
                 Print.warn(msg)
@@ -225,6 +232,10 @@ class LogParser:
         tmp = findall(r'\[.* Batch ([^ ]+) contains sample tx (\d+)', log)
         received = {int(s): d for d, s in tmp}
 
+        tmp = findall(r'\[.* WARN .* Consensus commit channel reached capacity (\d+) times', log)
+        tmp += [0] # Ensure tmp is not empty
+        consensus_channel_full = max([int(count) for count in tmp])
+
         tmp = findall(r'\[.* WARN .* Timeout', log)
         timeouts = len(tmp)
 
@@ -258,7 +269,7 @@ class LogParser:
             }
         }
 
-        return proposals, commits, sizes, timeouts, configs, received
+        return proposals, commits, sizes, timeouts, configs, received, consensus_channel_full
 
     def _parse_currency_node(self, log):
 
@@ -268,7 +279,7 @@ class LogParser:
         tmp = findall(r'\[(.*Z) .* Verified sample transaction (\d+) from (.*)', log)
         received = {(int(s), c): self._to_posix(t) for t, s, c in tmp}
 
-        tmp = findall(r'\[.* WARN .* Channel reached capacity (\d+) times', log)
+        tmp = findall(r'\[.* WARN .* Crypto output channel reached capacity (\d+) times', log)
         tmp += [0] # Ensure tmp is not empty
         crypto_channel_full = max([int(count) for count in tmp])
 
@@ -289,7 +300,7 @@ class LogParser:
             raise ParseError('Node(s) panicked')
 
         consensus_proposals, consensus_commits, consensus_sizes,  consensus_timeouts, \
-            consensus_configs, consensus_received = self._parse_consensus_node(log)
+            consensus_configs, consensus_received, consensus_channel_full = self._parse_consensus_node(log)
 
         currency_received, currency_commits, crypto_sizes, \
             currency_sizes, crypto_channel_full = self._parse_currency_node(log)
@@ -297,7 +308,7 @@ class LogParser:
         return consensus_proposals, consensus_commits, consensus_sizes, \
             consensus_timeouts, consensus_configs, consensus_received, \
             currency_received, currency_commits, \
-            crypto_sizes, currency_sizes, crypto_channel_full
+            crypto_sizes, currency_sizes, consensus_channel_full, crypto_channel_full
 
     def _to_posix(self, string):
         x = datetime.fromisoformat(string.replace('Z', '+00:00'))
@@ -463,9 +474,9 @@ class LogParser:
             currency_latency = self._crypto_latency() * 1000
             currency_str = (
                 f'\n'
-                f' Currency crypto TPS: {round(currency_tps):,} tx/s\n'
-                f' Currency crypto BPS: {round(currency_bps):,} B/s\n'
-                f' Currency crypto latency: {round(currency_latency):,} ms\n'
+                f' Crypto TPS: {round(currency_tps):,} tx/s\n'
+                f' Crypto BPS: {round(currency_bps):,} B/s\n'
+                f' Crypto latency: {round(currency_latency):,} ms\n'
             )
 
             if self.mode[0] in ['HotMove']:
@@ -500,6 +511,7 @@ class LogParser:
                 ' + WARN:\n'
                 f'{self.misses_str}'
                 f'{self.timeouts_str}'
+                f'{self.consensus_channel_str}'
                 f'{self.crypto_channel_str}'
                 '-----------------------------------------\n'
             )

@@ -289,7 +289,7 @@ class InstanceManager:
             #         GroupName=self.settings.testbed
             #     )
 
-            Print.heading(f'Testbed of {destroyed} instances destroyed')
+            Print.heading(f'Testbed size was reduced by {destroyed}')
         except ClientError as e:
             raise BenchError('Failed to terminate instances', AWSError(e))
 

@@ -261,6 +261,38 @@ class InstanceManager:
         except ClientError as e:
             raise BenchError('Failed to terminate instances', AWSError(e))
 
+    def reduce_instances(self, per_region = lambda n : n):
+        destroyed = 0
+        try:
+            ids, _ = self._get(['pending', 'running'])
+            size = sum(len(x) for x in ids.values())
+            if size == 0:
+                Print.heading(f'All instances are shut down')
+                return
+
+            # Terminate instances.
+            for region, client in self.clients.items():
+                if ids[region]:
+                    nb = int(per_region(len(ids[region])))
+                    to_terminate = ids[region][:nb]
+                    
+                    client.terminate_instances(InstanceIds=to_terminate)
+                    destroyed += len(to_terminate)
+
+            # Wait for all instances to properly shut down.
+            Print.info('Waiting for all instances to shut down...')
+            self._wait(['shutting-down'])
+            
+            ## NB: No security group was created
+            # for client in self.clients.values():
+            #     client.delete_security_group(
+            #         GroupName=self.settings.testbed
+            #     )
+
+            Print.heading(f'Testbed of {destroyed} instances destroyed')
+        except ClientError as e:
+            raise BenchError('Failed to terminate instances', AWSError(e))
+
     # Cancel openned spot requests
     def cancel_spot_request(self):
         try:

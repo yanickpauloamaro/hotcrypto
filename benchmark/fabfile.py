@@ -58,6 +58,15 @@ def destroy(ctx):
     except BenchError as e:
         Print.error(e)
 
+@task
+def reduce(ctx):
+    ''' Halves the number of nodes in the testbed '''
+    try:
+        per_region = lambda n: n/2
+        InstanceManager.make().reduce_instances(per_region=per_region)
+    except BenchError as e:
+        Print.error(e)
+
 
 @task
 def cancel(ctx):

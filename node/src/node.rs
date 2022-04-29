@@ -102,6 +102,28 @@ impl Node {
         address.set_port(port);
         info!("Listening to requests at {}", address);
 
+        let register = Register::read(register_file)?;
+        
+        let (vm, storage) = init_vm(&register)
+        .expect("Unable initialize move vm");
+        
+        let balances = register.accounts
+        .iter().map(|account| (account.address, CONST_INITIAL_BALANCE));
+        
+        let nonces = register.accounts
+        .iter().map(|account| (account.address, 0));
+        
+        let backlogs = register.accounts
+        .iter().map(|account| (account.address, BinaryHeap::new()));
+        
+        let mode = mode.parse::<Mode>()?;
+        CryptoVerifier::spawn(
+            mode.clone(),
+            store.clone(),
+            rx_commit,
+            tx_verified
+        );
+
         NetworkReceiver::spawn(
             address,
             /* handler */ RequestReceiverHandler { tx_request },
@@ -127,28 +149,6 @@ impl Node {
             rx_mempool_to_consensus,
             tx_consensus_to_mempool,
             tx_commit,
-        );
-
-        let register = Register::read(register_file)?;
-        
-        let (vm, storage) = init_vm(&register)
-        .expect("Unable initialize move vm");
-        
-        let balances = register.accounts
-        .iter().map(|account| (account.address, CONST_INITIAL_BALANCE));
-        
-        let nonces = register.accounts
-        .iter().map(|account| (account.address, 0));
-        
-        let backlogs = register.accounts
-        .iter().map(|account| (account.address, BinaryHeap::new()));
-        
-        let mode = mode.parse::<Mode>()?;
-        CryptoVerifier::spawn(
-            mode.clone(),
-            store,
-            rx_commit,
-            tx_verified
         );
 
         info!("Node {} successfully booted", name);
@@ -379,8 +379,9 @@ impl CryptoVerifier {
     }
 
     async fn verify_blocks(mut self) {
-        let mut counter = 0;
-        let limit = 100;
+        let mut counter: u64 = 0;
+        let mut limit: u64 = 1;
+        let mut previous: u64 = 1;
         while let Some(block) = self.to_verify.recv().await {
             let mut verified_block = Vec::with_capacity(block.payload.len());
 
@@ -394,8 +395,10 @@ impl CryptoVerifier {
                 Ok(_) => (),
                 Err(TrySendError::Full(retry)) => {
                     counter += 1;
-                    if counter % limit == 0 {
+                    if counter >= limit {
                         warn!("Crypto output channel reached capacity {} times", counter);
+                        limit += previous;
+                        previous = counter;
                     }
 
                     self.verified.send(retry).await;

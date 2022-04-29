@@ -42,8 +42,9 @@ pub struct Core {
     timer: Timer,
     aggregator: Aggregator,
     network: SimpleSender,
-    counter: u128,
-    limit: u128,
+    counter: u64,
+    limit: u64,
+    previous: u64,
 }
 
 impl Core {
@@ -83,7 +84,8 @@ impl Core {
                 aggregator: Aggregator::new(committee),
                 network: SimpleSender::new(),
                 counter: 0,
-                limit: 100,
+                limit: 1,
+                previous: 1,
             }
             .run()
             .await
@@ -157,8 +159,10 @@ impl Core {
                 Ok(_) => (),
                 Err(TrySendError::Full(retry)) => {
                     self.counter += 1;
-                    if self.counter % self.limit == 0 {
+                    if self.counter >= self.limit {
                         warn!("Consensus commit channel reached capacity {} times", self.counter);
+                        self.limit += self.previous;
+                        self.previous = self.counter;
                     }
 
                     if let Err(e) = self.tx_commit.send(retry).await {

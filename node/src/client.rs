@@ -357,7 +357,7 @@ trait CryptoCurrency {
 struct HotCrypto;
 impl CryptoCurrency for HotCrypto {
     fn transaction_payload(&self) -> Vec<u8> {
-        Vec::new()  // TODOTODO make payload the same size as hotmove for fair comparison?
+        Vec::new()
     }
 
     fn to_string(&self) -> String {

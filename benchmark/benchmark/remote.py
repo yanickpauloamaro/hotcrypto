@@ -194,7 +194,7 @@ class Bench:
         public_ips = [x.public for x in hosts]
 
         # TODOTODO make hotcrypto repo public and pull new changes instead of reuploading
-        ## Reupload code (Only ned to reupload if there was any changes to rust code)
+        ## Reupload code (Only need to reupload if there was any changes to rust code)
         # self._upload(public_ips)
 
         ## Recompile code
@@ -388,7 +388,7 @@ class Bench:
             raise BenchError('Failed to update nodes', e)
 
         # Ensure there enough files can be opened
-        cmd = 'ulimit -n 6000'
+        cmd = 'ulimit -n 1048575'
         subprocess.run([cmd], shell=True)
 
         # Run benchmarks.

@@ -488,7 +488,7 @@ impl CryptoVerifier {
                     };
                 }
 
-                // NOTE: This log entry is used to compute performance. TODOTODO
+                // NOTE: This log entry is used to compute performance.
                 #[cfg(feature = "benchmark")]
                 info!("Batch {:?} contains {} crypto tx", key, verified_batch.len());
 

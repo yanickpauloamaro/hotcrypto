@@ -156,9 +156,17 @@ class InstanceManager:
             ]
         )
 
-    def _get_ami(self, client):
+    def _get_ami(self, client, default_ami='ami-0c6ebbd55ab05f070'):
         ## NB: Using static AMI. Might need to change that if using multiple regions
-        return 'ami-0c6ebbd55ab05f070'
+        # return default_ami
+        saved_ami = 'ami-01b66dd0704d4884d' # AMI/yanick benchmarking
+
+        ## TODOTODO Remove AMI and snapshot from AWS
+        # saved_ami = 'ami-07ab8a4ffe4087bfd' #AMI/Benchmarking
+        # snapshot = snap-02b3042a853cc8fae
+        # saved_ami = 'ami-02cd6b848b4ebb451' #AMI/Updated
+        # snapshot = snap-09aeff7b21cb97ae3
+        return saved_ami
 
         # # The AMI changes with regions.
         # response = client.describe_images(

@@ -49,7 +49,8 @@ class Bench:
         except (IOError, PasswordRequiredException, SSHException) as e:
             raise BenchError('Failed to load SSH key', e)
 
-    def _check_stderr(self, output):
+    @staticmethod
+    def _check_stderr(output):
         if isinstance(output, dict):
             for x in output.values():
                 if x.stderr:
@@ -208,7 +209,15 @@ class Bench:
         cmd = f'tmux new -d -s "{name}" "{command} |& tee {log_file}"'
         c = Connection(host.public, user='ubuntu', connect_kwargs=self.connect)
         output = c.run(cmd, hide=True)
-        self._check_stderr(output)
+        Bench._check_stderr(output)
+
+    @staticmethod
+    def _run_in_background(host, command, log_file, pkey):
+        name = splitext(basename(log_file))[0]
+        cmd = f'tmux new -d -s "{name}" "{command} |& tee {log_file}"'
+        c = Connection(host.public, user='ubuntu', connect_kwargs={"pkey": pkey,})
+        output = c.run(cmd, hide=True)
+        Bench._check_stderr(output)
 
     def _update(self, hosts):
         Print.info(
@@ -357,41 +366,43 @@ class Bench:
         client_logs = [PathMaker.client_log_file(i) for i in range(len(hosts))]
         client_key_files = [PathMaker.key_file(i, 'client') for i in range(len(hosts))] ##
 
-        for host, key_file, addr, log_file in zip(hosts, client_key_files, addresses, client_logs):
-            cmd = CommandMaker.run_client(
-                addr,
-                bench_parameters.tx_size,
-                rate_share,
-                timeout,
-                bench_parameters.duration,
-                key_file,
-                PathMaker.register_file(),
-                self.mode,
-                nodes=addresses,
-            )
-            self._background_run(host, cmd, log_file)
-
-            if self.mode == 'movevm':
-                # Only run one client for benchmarking MoveVM
-                break
+        params = zip(hosts, client_key_files, addresses, client_logs)
+        indexed = zip(range(0, len(hosts)), params)
+        tmp = [(i, self.mode, self.manager.settings.key_path, \
+            rate_share, timeout, addresses, \
+                bench_parameters, param) for i, param in indexed]
+        try:
+            with Pool() as p:
+                for _ in tqdm.tqdm(
+                    p.imap(Bench.boot_client, tmp),
+                    desc="Booting clients",
+                    bar_format='{l_bar}{bar:20}{r_bar}{bar:-10b}',
+                    total=len(tmp)):
+                    pass
+        except (ValueError, IndexError) as e:
+            raise BenchError(f'Failed to boot clients: {e}')
 
         if self.mode not in ['movevm']:
             # Run the nodes.
             key_files = [PathMaker.key_file(i) for i in range(len(hosts))]
             dbs = [PathMaker.db_path(i) for i in range(len(hosts))]
             node_logs = [PathMaker.node_log_file(i) for i in range(len(hosts))]
-            for host, key_file, db, log_file in zip(hosts, key_files, dbs, node_logs):
-                cmd = CommandMaker.run_node(
-                    key_file,
-                    PathMaker.committee_file(),
-                    db,
-                    PathMaker.parameters_file(),
-                    self.settings.request_port,
-                    PathMaker.register_file(),
-                    self.mode,
-                    debug=debug
-                )
-                self._background_run(host, cmd, log_file)
+            
+            params = zip(hosts, key_files, dbs, node_logs)
+            indexed = zip(range(0, len(hosts)), params)
+            tmp = [(i, self.mode, self.manager.settings.key_path, \
+                debug, self.settings.request_port, \
+                    param) for i, param in indexed]
+            try:
+                with Pool() as p:
+                    for _ in tqdm.tqdm(
+                        p.imap(Bench.boot_node, tmp),
+                        desc="Booting nodes",
+                        bar_format='{l_bar}{bar:20}{r_bar}{bar:-10b}',
+                        total=len(tmp)):
+                        pass
+            except (ValueError, IndexError) as e:
+                raise BenchError(f'Failed to boot nodes: {e}')
 
             # Wait for the nodes to synchronize
             Print.info('Waiting for the nodes to synchronize...')
@@ -404,6 +415,50 @@ class Bench:
         
         sleep(2) # Make sure the clients have time to stop on their own
         self.kill(hosts=hosts, delete_logs=False)
+
+    @staticmethod
+    def boot_client(tmp):
+        (i, mode, key_path, \
+            rate_share, timeout, addresses, \
+            bench_parameters, params) = tmp
+        (host, key_file, addr, log_file) = params
+
+        pkey = RSAKey.from_private_key_file(key_path)
+        if mode == 'movevm' and i != 0:
+            # Only run one client for benchmarking MoveVM
+            return
+
+        cmd = CommandMaker.run_client(
+            addr,
+            bench_parameters.tx_size,
+            rate_share,
+            timeout,
+            bench_parameters.duration,
+            key_file,
+            PathMaker.register_file(),
+            mode,
+            nodes=addresses,
+        )
+        Bench._run_in_background(host, cmd, log_file, pkey)
+    
+    @staticmethod
+    def boot_node(tmp):
+        (i, mode, key_path, debug, request_port, params) = tmp
+        (host, key_file, db, log_file) = params
+
+        pkey = RSAKey.from_private_key_file(key_path)
+
+        cmd = CommandMaker.run_node(
+            key_file,
+            PathMaker.committee_file(),
+            db,
+            PathMaker.parameters_file(),
+            request_port,
+            PathMaker.register_file(),
+            mode,
+            debug=debug
+        )
+        Bench._run_in_background(host, cmd, log_file, pkey)
 
     def _get_logs(self, hosts):
         # Delete local logs (if any).

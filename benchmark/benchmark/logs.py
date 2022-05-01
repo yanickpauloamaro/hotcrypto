@@ -176,7 +176,10 @@ class LogParser:
             tmp = search(r'\[(.*Z) .* Stop sending ', log)
             if tmp is None:
                 tmp = tmp = search(r'\[(.*Z) .* Stop processing ', log)
-            end = self._to_posix(tmp.group(1))
+            if tmp is None:
+                end = self._to_posix('2000-05-01T19:44:47.328Z')
+            else:
+                end = self._to_posix(tmp.group(1))
 
             misses = len(findall(r'rate too high', log))
 
@@ -348,6 +351,7 @@ class LogParser:
         commits = self.commits['consensus'].items()
         latency = 0
         for d, c in commits:
+            # if d in self.proposals:
             if c - self.proposals[d] > 0:
                 latency += c - self.proposals[d]
         return latency / len(commits) if commits else 0

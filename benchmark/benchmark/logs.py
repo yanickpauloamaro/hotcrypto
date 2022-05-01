@@ -8,6 +8,8 @@ from statistics import mean
 import uuid
 import subprocess
 from benchmark.commands import CommandMaker
+import tqdm
+import threading
 
 from benchmark.utils import Print, PathMaker
 
@@ -16,25 +18,29 @@ class ParseError(Exception):
     pass
 
 class LogParser:
-    def __init__(self, client_logs, node_logs, faults, nb_accounts):
-        inputs = [client_logs, node_logs]
-        assert all(isinstance(x, list) for x in inputs)
-        assert all(isinstance(x, str) for y in inputs for x in y)
-        assert client_logs
+
+    def __init__(self, directory, faults, nb_accounts):
+        client_filenames = sorted(glob(join(directory, 'client-*.log')))
+        nodes_filenames = sorted(glob(join(directory, 'node-*.log')))
 
         self.faults = faults
         self.warn = False
-        if len(node_logs) == 0:
+        if len(nodes_filenames) == 0:
             self.committee_size = nb_accounts
         elif isinstance(faults, int):
-            self.committee_size = len(node_logs) + int(faults)
+            self.committee_size = len(nodes_filenames) + int(faults)
         else:
             self.committee_size = '?'
 
         # Parse the clients logs.
         try:
             with Pool() as p:
-                results = p.map(self._parse_clients, client_logs)
+                results = list(tqdm.tqdm(
+                        p.imap(self._parse_clients, client_filenames),
+                        desc="Parsing client logs",
+                        bar_format='{l_bar}{bar:20}{r_bar}{bar:-10b}',
+                        total=len(client_filenames)))
+
         except (ValueError, IndexError) as e:
             raise ParseError(f'Failed to parse client logs: {e}')
         self.tx_size, self.rate, start, end, misses, self.mode, self.cores, \
@@ -74,8 +80,13 @@ class LogParser:
         if self.mode[0] != 'MoveVM':
             # Parse the nodes logs.
             try:
-                with Pool() as p:
-                    results = p.map(self._parse_nodes, node_logs)
+                with Pool(processes=3) as p:
+                    results = list(tqdm.tqdm(
+                        p.imap(self._parse_nodes, nodes_filenames),
+                        desc="Parsing node logs",
+                        bar_format='{l_bar}{bar:20}{r_bar}{bar:-10b}',
+                        total=len(nodes_filenames)))
+
             except (ValueError, IndexError) as e:
                 raise ParseError(f'Failed to parse node logs: {e}')
             consensus_proposals, consensus_commits, consensus_sizes, \
@@ -147,33 +158,36 @@ class LogParser:
                     merged[batch_id] = (ts, nb)
         return merged
 
-    def _parse_clients(self, log):
-        if search(r'Z Error', log) is not None:
-            raise ParseError('Client(s) panicked')
+    # def _parse_clients(self, log):
+    def _parse_clients(self, filename):
+        with open(filename, 'r') as f:
+            log = f.read()
+            if search(r'Z Error', log) is not None:
+                raise ParseError('Client(s) panicked')
 
-        mode = search(r'Benchmarking (.*)', log).group(1)
-        cores = int(search(r'Number of cores: (\d+)', log).group(1))
-        size = int(search(r'Transactions size: (\d+)', log).group(1))
-        rate = int(search(r'Transactions rate: (\d+)', log).group(1))
+            mode = search(r'Benchmarking (.*)', log).group(1)
+            cores = int(search(r'Number of cores: (\d+)', log).group(1))
+            size = int(search(r'Transactions size: (\d+)', log).group(1))
+            rate = int(search(r'Transactions rate: (\d+)', log).group(1))
 
-        tmp = search(r'\[(.*Z) .* Start sending', log).group(1)
-        start = self._to_posix(tmp)
+            tmp = search(r'\[(.*Z) .* Start sending', log).group(1)
+            start = self._to_posix(tmp)
 
-        tmp = search(r'\[(.*Z) .* Stop sending ', log)
-        if tmp is None:
-            tmp = tmp = search(r'\[(.*Z) .* Stop processing ', log)
-        end = self._to_posix(tmp.group(1))
+            tmp = search(r'\[(.*Z) .* Stop sending ', log)
+            if tmp is None:
+                tmp = tmp = search(r'\[(.*Z) .* Stop processing ', log)
+            end = self._to_posix(tmp.group(1))
 
-        misses = len(findall(r'rate too high', log))
+            misses = len(findall(r'rate too high', log))
 
-        consensus_samples = self._parse_consensus_client(log)
-        currency_samples = self._parse_currency_client(log)
+            consensus_samples = self._parse_consensus_client(log)
+            currency_samples = self._parse_currency_client(log)
 
-        move_samples, move_commits, move_nb_tx, move_stats = self._parse_move_client(log)
-        
-        return size, rate, start, end, misses, mode, cores, \
-            consensus_samples, currency_samples, \
-            move_samples, move_commits, move_nb_tx, move_stats
+            move_samples, move_commits, move_nb_tx, move_stats = self._parse_move_client(log)
+            
+            return size, rate, start, end, misses, mode, cores, \
+                consensus_samples, currency_samples, \
+                move_samples, move_commits, move_nb_tx, move_stats
 
     
     def _parse_consensus_client(self, log):
@@ -295,20 +309,24 @@ class LogParser:
 
         return received, commits, crypto_sizes, currency_sizes, crypto_channel_full
 
-    def _parse_nodes(self, log):
-        if search(r'panic', log) is not None:
-            raise ParseError('Node(s) panicked')
+    # def _parse_nodes(self, log):
+    def _parse_nodes(self, filename):
+        with open(filename, 'r') as f:
 
-        consensus_proposals, consensus_commits, consensus_sizes,  consensus_timeouts, \
-            consensus_configs, consensus_received, consensus_channel_full = self._parse_consensus_node(log)
+            log = f.read()
+            if search(r'panic', log) is not None:
+                raise ParseError('Node(s) panicked')
 
-        currency_received, currency_commits, crypto_sizes, \
-            currency_sizes, crypto_channel_full = self._parse_currency_node(log)
+            consensus_proposals, consensus_commits, consensus_sizes,  consensus_timeouts, \
+                consensus_configs, consensus_received, consensus_channel_full = self._parse_consensus_node(log)
 
-        return consensus_proposals, consensus_commits, consensus_sizes, \
-            consensus_timeouts, consensus_configs, consensus_received, \
-            currency_received, currency_commits, \
-            crypto_sizes, currency_sizes, consensus_channel_full, crypto_channel_full
+            currency_received, currency_commits, crypto_sizes, \
+                currency_sizes, crypto_channel_full = self._parse_currency_node(log)
+
+            return consensus_proposals, consensus_commits, consensus_sizes, \
+                consensus_timeouts, consensus_configs, consensus_received, \
+                currency_received, currency_commits, \
+                crypto_sizes, currency_sizes, consensus_channel_full, crypto_channel_full
 
     def _to_posix(self, string):
         x = datetime.fromisoformat(string.replace('Z', '+00:00'))
@@ -573,14 +591,4 @@ class LogParser:
     @classmethod
     def process(cls, directory, faults, nb_accounts = '?'):
         assert isinstance(directory, str)
-
-        clients = []
-        for filename in sorted(glob(join(directory, 'client-*.log'))):
-            with open(filename, 'r') as f:
-                clients += [f.read()]
-        nodes = []
-        for filename in sorted(glob(join(directory, 'node-*.log'))):
-            with open(filename, 'r') as f:
-                nodes += [f.read()]
-
-        return cls(clients, nodes, faults, nb_accounts)
+        return cls(directory, faults, nb_accounts)

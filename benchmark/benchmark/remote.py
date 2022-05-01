@@ -9,6 +9,8 @@ from time import sleep
 from math import ceil
 from os.path import join
 import subprocess
+from multiprocessing import Pool
+import tqdm
 
 from benchmark.config import Committee, Key, NodeParameters, BenchParameters, ConfigError, Register
 from benchmark.utils import BenchError, Print, PathMaker, progress_bar
@@ -136,7 +138,7 @@ class Bench:
         except GroupException as e:
             raise BenchError('Failed to kill nodes', FabricError(e))
 
-    def _upload(self, public_ips, cd=False):
+    def _upload(self, public_ips):
         Print.info('Compressing repo...')
 
         filename = self.settings.repo_name
@@ -144,11 +146,25 @@ class Bench:
         cmd = CommandMaker.compress_repo(filename, zip_name)
         subprocess.run([cmd], check=True, shell=True)
 
+        tmp = []
+        for i in range(0, len(public_ips)):
+            tmp += [(i, public_ips[i], zip_name, self.manager.settings.key_path)]
+        try:
+            with Pool() as p:
+                for _ in tqdm.tqdm(
+                    p.imap(Bench.send_repo, tmp),
+                    desc="Uploading repo archive",
+                    bar_format='{l_bar}{bar:20}{r_bar}{bar:-10b}',
+                    total=len(tmp)):
+                    pass
+        except (ValueError, IndexError) as e:
+            raise BenchError(f'Failed to upload repo archive: {e}')
+
         # Upload configuration files.
-        progress = progress_bar(public_ips, prefix='Uploading repo:')
-        for _, host in enumerate(progress):
-            c = Connection(host, user='ubuntu', connect_kwargs=self.connect)
-            c.put(f'{zip_name}.zip', '.')
+        # progress = progress_bar(public_ips, prefix='Uploading repo:')
+        # for _, host in enumerate(progress):
+        #     c = Connection(host, user='ubuntu', connect_kwargs=self.connect)
+        #     c.put(f'{zip_name}.zip', '.') # TODOTODO move in a function
 
         Print.info('Decompressing...')
         decompress = CommandMaker.decompress_repo(self.settings.repo_name)
@@ -156,11 +172,20 @@ class Bench:
             f'(({decompress}) || true)'
         ]
 
-        if cd:
-            cmd += [f'cd {filename}']
-
         g = Group(*public_ips, user='ubuntu', connect_kwargs=self.connect)
         g.run(' && '.join(cmd), hide=True)
+
+    @staticmethod
+    def send_repo(tmp):
+        (i, host, zip_name, key_path) = tmp
+        pkey = RSAKey.from_private_key_file(key_path)
+        c = Connection(
+            host.public,
+            user='ubuntu',
+            connect_kwargs={
+            "pkey": pkey,
+        },)
+        c.put(f'{zip_name}.zip', '.')
 
     def _select_hosts(self, bench_parameters):
         nodes = max(bench_parameters.nodes)
@@ -219,6 +244,7 @@ class Bench:
         subprocess.run([cmd], shell=True, stderr=subprocess.DEVNULL)
 
         # Recompile the latest code.
+        Print.info('Recompiling...')
         cmd = CommandMaker.compile(self.jobs).split()
         subprocess.run(cmd, check=True, cwd=PathMaker.node_crate_path())
 
@@ -229,7 +255,8 @@ class Bench:
         # Generate configuration files for nodes.
         keys = []
         key_files = [PathMaker.key_file(i) for i in range(len(hosts))]
-        for filename in key_files:
+        progress = progress_bar(key_files, prefix='Generating node keys:')
+        for i, filename in enumerate(progress):
             cmd = CommandMaker.generate_key(filename).split()
             subprocess.run(cmd, check=True)
             keys += [Key.from_file(filename)]
@@ -237,7 +264,8 @@ class Bench:
         # Generate configuration files for clients. ##
         client_keys = []
         client_key_files = [PathMaker.key_file(i, 'client') for i in range(nb_accounts)]
-        for filename in client_key_files:
+        progress = progress_bar(client_key_files, prefix='Generating client keys:')
+        for i, filename in enumerate(progress):
             cmd = CommandMaker.generate_key(filename, 'client').split()
             subprocess.run(cmd, check=True)
             client_keys += [Key.from_file(filename)]
@@ -264,6 +292,12 @@ class Bench:
         g = Group(*public_ips, user='ubuntu', connect_kwargs=self.connect)
         g.run(cmd, hide=True)
 
+        self.send_config_paralell(hosts)
+        # self.send_config_sequential(hosts)
+
+        return committee
+
+    def send_config_sequential(self, hosts):
         # Upload configuration files.
         progress = progress_bar(hosts, prefix='Uploading config files:')
         for i, host in enumerate(progress):
@@ -274,7 +308,36 @@ class Bench:
             c.put(PathMaker.parameters_file(), '.')
             c.put(PathMaker.register_file(), '.')
 
-        return committee
+    def send_config_paralell(self, hosts):
+        tmp = []
+        for i in range(0, len(hosts)):
+            tmp += [(i, hosts[i], self.mode, self.manager.settings.key_path)]
+        try:
+            with Pool() as p:
+                for _ in tqdm.tqdm(
+                    p.imap(Bench.send_host_config, tmp),
+                    desc="Uploading config files",
+                    bar_format='{l_bar}{bar:20}{r_bar}{bar:-10b}',
+                    total=len(tmp)):
+                    pass
+        except (ValueError, IndexError) as e:
+            raise BenchError(f'Failed to upload configs: {e}')
+    
+    @staticmethod
+    def send_host_config(tmp):
+        (i, host, mode, key_path) = tmp
+        pkey = RSAKey.from_private_key_file(key_path)
+        c = Connection(
+            host.public,
+            user='ubuntu',
+            connect_kwargs={
+            "pkey": pkey,
+        },)
+        c.put(PathMaker.committee_file(), '.')
+        c.put(PathMaker.key_file(i), '.')
+        c.put(PathMaker.key_file(i, 'client'), '.')
+        c.put(PathMaker.parameters_file(), '.')
+        c.put(PathMaker.register_file(), '.')
 
     def _run_single(self, hosts, rate, bench_parameters, node_parameters, debug=False):
         Print.info('Booting testbed...')
@@ -347,6 +410,10 @@ class Bench:
         cmd = CommandMaker.clean_logs()
         subprocess.run([cmd], shell=True, stderr=subprocess.DEVNULL)
 
+        self._get_logs_parallel(hosts)
+        # self._get_logs_sequential(hosts)
+
+    def _get_logs_sequential(self, hosts):
         # Download log files.
         progress = progress_bar(hosts, prefix='Downloading logs:')
         for i, host in enumerate(progress):
@@ -356,6 +423,40 @@ class Bench:
             )
             if self.mode not in ['movevm']:
                 c.get(PathMaker.node_log_file(i), local=PathMaker.node_log_file(i))
+
+    def _get_logs_parallel(self, hosts):
+        
+        tmp = []
+        for i in range(0, len(hosts)):
+            tmp += [(i, hosts[i], self.mode, self.manager.settings.key_path)]
+        try:
+            with Pool() as p:
+                for _ in tqdm.tqdm(
+                    p.imap(Bench.get_host_logs, tmp),
+                    desc="Downloading logs",
+                    bar_format='{l_bar}{bar:20}{r_bar}{bar:-10b}',
+                    total=len(tmp)):
+                    pass
+        except (ValueError, IndexError) as e:
+            raise BenchError(f'Failed to download logs: {e}')
+    
+    @staticmethod
+    def get_host_logs(tmp):
+        (i, host, mode, key_path) = tmp
+        pkey = RSAKey.from_private_key_file(key_path)
+        c = Connection(
+            host.public,
+            user='ubuntu',
+            connect_kwargs={
+            "pkey": pkey,
+        },)
+        c.get(
+            PathMaker.client_log_file(i), local=PathMaker.client_log_file(i)
+        )
+        if mode not in ['movevm']:
+            c.get(PathMaker.node_log_file(i), local=PathMaker.node_log_file(i))
+
+        return 0
 
     def _logs(self, hosts, faults, nb_accounts):
         
@@ -398,6 +499,7 @@ class Bench:
                 hosts = selected_hosts[:n]
 
                 # Upload all configuration files.
+                # TODOTODO Don't need to recreate config files if I only test one config
                 try:
                     self._config(hosts, n, node_parameters)
                 except (subprocess.SubprocessError, GroupException) as e:

@@ -1,0 +1,35 @@
+
+-----------------------------------------
+ SUMMARY: HotStuff add4606a840a4065807262624aafe05f
+-----------------------------------------
+ + CONFIG:
+ Faults: 0 nodes
+ Committee size: 12 nodes
+ Transaction size: 197 B
+
+ Consensus timeout delay: 5,000 ms
+ Consensus sync retry delay: 5,000 ms
+ Mempool GC depth: 50 rounds
+ Mempool sync retry delay: 5,000 ms
+ Mempool sync retry nodes: 3 nodes
+ Mempool batch size: 500,000 B
+ Mempool max batch delay: 100 ms
+
+-----------------------------------------
+ + INFO:
+ Input rate: 150,000 tx/s
+ Number of cores: 4
+ Number of accounts: 12
+ Execution time: 120 s
+ Benchmark start: 02-05-2022 00:42:42
+ Benchmark end:   02-05-2022 00:44:42
+-----------------------------------------
+ + RESULTS:
+ Consensus TPS: 148,968 tx/s
+ Consensus BPS: 29,346,615 B/s
+ Consensus latency: 29 ms
+
+ End-to-end TPS: 148,942 tx/s
+ End-to-end BPS: 29,341,518 B/s
+ End-to-end latency: 419 ms
+-----------------------------------------

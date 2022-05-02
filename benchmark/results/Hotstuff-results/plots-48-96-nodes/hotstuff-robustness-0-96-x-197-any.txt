@@ -1,0 +1,47 @@
+
+-----------------------------------------
+ RESULTS:
+-----------------------------------------
+ Faults: 0 nodes
+ Committee size: 96 nodes
+ Input rate: x tx/s
+ Transaction size: 197 B
+ Max latency: any ms
+ Number of cores: 4 ms
+
+ Variable value: X=25056
+ TPS: 24406 +/- 0 tx/s
+ Latency: 4987 +/- 0 ms
+
+ Variable value: X=50016
+ TPS: 48867 +/- 0 tx/s
+ Latency: 12101 +/- 0 ms
+
+ Variable value: X=75072
+ TPS: 71576 +/- 0 tx/s
+ Latency: 17634 +/- 0 ms
+
+ Variable value: X=85056
+ TPS: 83347 +/- 0 tx/s
+ Latency: 3200 +/- 0 ms
+
+ Variable value: X=90048
+ TPS: 87496 +/- 0 tx/s
+ Latency: 2759 +/- 0 ms
+
+ Variable value: X=95040
+ TPS: 92395 +/- 0 tx/s
+ Latency: 2351 +/- 0 ms
+
+ Variable value: X=100032
+ TPS: 98678 +/- 0 tx/s
+ Latency: 1937 +/- 0 ms
+
+ Variable value: X=110016
+ TPS: 65079 +/- 0 tx/s
+ Latency: 4318 +/- 0 ms
+
+ Variable value: X=150048
+ TPS: 36977 +/- 0 tx/s
+ Latency: 9610 +/- 0 ms
+-----------------------------------------

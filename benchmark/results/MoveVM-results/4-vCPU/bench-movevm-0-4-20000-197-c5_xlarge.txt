@@ -1,0 +1,66 @@
+
+-----------------------------------------
+ SUMMARY: MoveVM 1e610205d9374713a6f5f5de64280327
+-----------------------------------------
+ + INFO:
+ Input rate: 20,000 tx/s
+ Number of cores: 4
+ Number of accounts: 4
+ Execution time: 200 s
+ Benchmark start: 30-04-2022 17:26:45
+ Benchmark end:   30-04-2022 17:30:05
+-----------------------------------------
+ + RESULTS:
+ MoveVM TPS: 20,001 tx/s
+ MoveVM latency: 6 ms
+
+ MoveVM session creation:  total   139 ms, avg  0 μs
+ MoveVM script execution:  total 40682 ms, avg 10 μs
+ MoveVM closing session:   total  5066 ms, avg  1 μs
+ MoveVM applying changset: total  1757 ms, avg  0 μs
+ MoveVM execution time:    total 47646 ms, avg 11 μs
+-----------------------------------------
+
+-----------------------------------------
+ SUMMARY: MoveVM 19a3a6dc7cd141a993e526433b7afbc2
+-----------------------------------------
+ + INFO:
+ Input rate: 20,000 tx/s
+ Number of cores: 4
+ Number of accounts: 4
+ Execution time: 200 s
+ Benchmark start: 30-04-2022 17:30:11
+ Benchmark end:   30-04-2022 17:33:31
+-----------------------------------------
+ + RESULTS:
+ MoveVM TPS: 20,001 tx/s
+ MoveVM latency: 6 ms
+
+ MoveVM session creation:  total   147 ms, avg  0 μs
+ MoveVM script execution:  total 40817 ms, avg 10 μs
+ MoveVM closing session:   total  5049 ms, avg  1 μs
+ MoveVM applying changset: total  1781 ms, avg  0 μs
+ MoveVM execution time:    total 47796 ms, avg 11 μs
+-----------------------------------------
+
+-----------------------------------------
+ SUMMARY: MoveVM cc5f3869376b4718a5f345a0a582ebc7
+-----------------------------------------
+ + INFO:
+ Input rate: 20,000 tx/s
+ Number of cores: 4
+ Number of accounts: 4
+ Execution time: 200 s
+ Benchmark start: 30-04-2022 17:33:37
+ Benchmark end:   30-04-2022 17:36:57
+-----------------------------------------
+ + RESULTS:
+ MoveVM TPS: 20,001 tx/s
+ MoveVM latency: 6 ms
+
+ MoveVM session creation:  total   148 ms, avg  0 μs
+ MoveVM script execution:  total 40248 ms, avg 10 μs
+ MoveVM closing session:   total  4928 ms, avg  1 μs
+ MoveVM applying changset: total  1709 ms, avg  0 μs
+ MoveVM execution time:    total 47034 ms, avg 11 μs
+-----------------------------------------

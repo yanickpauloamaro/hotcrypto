@@ -1,0 +1,22 @@
+
+-----------------------------------------
+ SUMMARY: MoveVM 34486747796245c48475280f4dc685b8
+-----------------------------------------
+ + INFO:
+ Input rate: 80,000 tx/s
+ Number of cores: 16
+ Number of accounts: 4
+ Execution time: 120 s
+ Benchmark start: 02-05-2022 02:29:55
+ Benchmark end:   02-05-2022 02:31:55
+-----------------------------------------
+ + RESULTS:
+ MoveVM TPS: 80,001 tx/s
+ MoveVM latency: 14 ms
+
+ MoveVM session creation:  total    361 ms, avg  0 μs
+ MoveVM script execution:  total  95947 ms, avg  9 μs
+ MoveVM closing session:   total  11654 ms, avg  1 μs
+ MoveVM applying changset: total   4241 ms, avg  0 μs
+ MoveVM execution time:    total 112205 ms, avg 11 μs
+-----------------------------------------

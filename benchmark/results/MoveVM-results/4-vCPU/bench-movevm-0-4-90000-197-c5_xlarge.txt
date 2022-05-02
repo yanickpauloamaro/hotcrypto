@@ -1,0 +1,75 @@
+
+-----------------------------------------
+ SUMMARY: MoveVM ddd5f1273ad943dd9f2044bd0c7d8131
+-----------------------------------------
+ + INFO:
+ Input rate: 90,000 tx/s
+ Number of cores: 4
+ Number of accounts: 4
+ Execution time: 200 s
+ Benchmark start: 30-04-2022 17:58:18
+ Benchmark end:   30-04-2022 18:01:38
+-----------------------------------------
+ + WARN:
+ Clients missed their target rate 1,139 time(s)
+-----------------------------------------
+ + RESULTS:
+ MoveVM TPS: 71,560 tx/s
+ MoveVM latency: 8,592 ms
+
+ MoveVM session creation:  total    586 ms, avg  0 μs
+ MoveVM script execution:  total 148099 ms, avg 10 μs
+ MoveVM closing session:   total  18292 ms, avg  1 μs
+ MoveVM applying changset: total   6485 ms, avg  0 μs
+ MoveVM execution time:    total 173463 ms, avg 12 μs
+-----------------------------------------
+
+-----------------------------------------
+ SUMMARY: MoveVM 49dc3e0743e6489889281972a3f39599
+-----------------------------------------
+ + INFO:
+ Input rate: 90,000 tx/s
+ Number of cores: 4
+ Number of accounts: 4
+ Execution time: 200 s
+ Benchmark start: 30-04-2022 18:16:44
+ Benchmark end:   30-04-2022 18:20:04
+-----------------------------------------
+ + WARN:
+ Clients missed their target rate 1,163 time(s)
+-----------------------------------------
+ + RESULTS:
+ MoveVM TPS: 71,545 tx/s
+ MoveVM latency: 8,646 ms
+
+ MoveVM session creation:  total    559 ms, avg  0 μs
+ MoveVM script execution:  total 147959 ms, avg 10 μs
+ MoveVM closing session:   total  18240 ms, avg  1 μs
+ MoveVM applying changset: total   6503 ms, avg  0 μs
+ MoveVM execution time:    total 173262 ms, avg 12 μs
+-----------------------------------------
+
+-----------------------------------------
+ SUMMARY: MoveVM cf95b0b0f31242d3bdbe2478b3c25c82
+-----------------------------------------
+ + INFO:
+ Input rate: 90,000 tx/s
+ Number of cores: 4
+ Number of accounts: 4
+ Execution time: 200 s
+ Benchmark start: 30-04-2022 18:20:09
+ Benchmark end:   30-04-2022 18:23:29
+-----------------------------------------
+ + WARN:
+ Clients missed their target rate 1,255 time(s)
+-----------------------------------------
+ + RESULTS:
+ MoveVM TPS: 69,764 tx/s
+ MoveVM latency: 9,142 ms
+
+ MoveVM session creation:  total    566 ms, avg  0 μs
+ MoveVM script execution:  total 147037 ms, avg 10 μs
+ MoveVM closing session:   total  17707 ms, avg  1 μs
+ MoveVM applying changset: total   6734 ms, avg  0 μs
+ MoveVM execution time:    total 172046 ms, avg 12 μs
+-----------------------------------------

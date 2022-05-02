@@ -1,0 +1,132 @@
+
+-----------------------------------------
+ SUMMARY: HotCrypto 0db56708e9004dbcafb6cd1d07ab5084
+-----------------------------------------
+ + CONFIG:
+ Faults: 0 nodes
+ Committee size: 4 nodes
+ Transaction size: 197 B
+
+ Consensus timeout delay: 5,000 ms
+ Consensus sync retry delay: 5,000 ms
+ Mempool GC depth: 50 rounds
+ Mempool sync retry delay: 5,000 ms
+ Mempool sync retry nodes: 3 nodes
+ Mempool batch size: 500,000 B
+ Mempool max batch delay: 100 ms
+
+-----------------------------------------
+ + INFO:
+ Input rate: 55,000 tx/s
+ Number of cores: 4
+ Number of accounts: 4
+ Execution time: 200 s
+ Benchmark start: 30-04-2022 14:36:26
+ Benchmark end:   30-04-2022 14:39:46
+-----------------------------------------
+ + WARN:
+ Clients missed their target rate 334 time(s)
+ Nodes timed out 12 time(s)
+ Consensus waited on Crypto 1,613 time(s)
+-----------------------------------------
+ + RESULTS:
+ Consensus TPS: 54,937 tx/s
+ Consensus BPS: 10,822,678 B/s
+ Consensus latency: 357 ms
+
+ End-to-end TPS: 54,931 tx/s
+ End-to-end BPS: 10,821,491 B/s
+ End-to-end latency: 3,567 ms
+
+ Crypto TPS: 47,614 tx/s
+ Crypto BPS: 9,379,928 B/s
+ Crypto latency: 19,802 ms
+-----------------------------------------
+
+-----------------------------------------
+ SUMMARY: HotCrypto 1eb723db744a4e52b633a298b99c625e
+-----------------------------------------
+ + CONFIG:
+ Faults: 0 nodes
+ Committee size: 4 nodes
+ Transaction size: 197 B
+
+ Consensus timeout delay: 5,000 ms
+ Consensus sync retry delay: 5,000 ms
+ Mempool GC depth: 50 rounds
+ Mempool sync retry delay: 5,000 ms
+ Mempool sync retry nodes: 3 nodes
+ Mempool batch size: 500,000 B
+ Mempool max batch delay: 100 ms
+
+-----------------------------------------
+ + INFO:
+ Input rate: 55,000 tx/s
+ Number of cores: 4
+ Number of accounts: 4
+ Execution time: 200 s
+ Benchmark start: 30-04-2022 14:40:13
+ Benchmark end:   30-04-2022 14:43:33
+-----------------------------------------
+ + WARN:
+ Clients missed their target rate 481 time(s)
+ Nodes timed out 8 time(s)
+ Consensus waited on Crypto 1,076 time(s)
+-----------------------------------------
+ + RESULTS:
+ Consensus TPS: 54,904 tx/s
+ Consensus BPS: 10,816,151 B/s
+ Consensus latency: 31 ms
+
+ End-to-end TPS: 54,891 tx/s
+ End-to-end BPS: 10,813,613 B/s
+ End-to-end latency: 1,082 ms
+
+ Crypto TPS: 48,264 tx/s
+ Crypto BPS: 9,507,952 B/s
+ Crypto latency: 21,102 ms
+-----------------------------------------
+
+-----------------------------------------
+ SUMMARY: HotCrypto 055b42047f6e49fc9883630df4960c37
+-----------------------------------------
+ + CONFIG:
+ Faults: 0 nodes
+ Committee size: 4 nodes
+ Transaction size: 197 B
+
+ Consensus timeout delay: 5,000 ms
+ Consensus sync retry delay: 5,000 ms
+ Mempool GC depth: 50 rounds
+ Mempool sync retry delay: 5,000 ms
+ Mempool sync retry nodes: 3 nodes
+ Mempool batch size: 500,000 B
+ Mempool max batch delay: 100 ms
+
+-----------------------------------------
+ + INFO:
+ Input rate: 55,000 tx/s
+ Number of cores: 4
+ Number of accounts: 4
+ Execution time: 200 s
+ Benchmark start: 30-04-2022 14:43:59
+ Benchmark end:   30-04-2022 14:47:19
+-----------------------------------------
+ + WARN:
+ Clients missed their target rate 666 time(s)
+ Nodes timed out 9 time(s)
+ Consensus waited on Crypto 1,013 time(s)
+-----------------------------------------
+ + RESULTS:
+ Consensus TPS: 54,929 tx/s
+ Consensus BPS: 10,820,953 B/s
+ Consensus latency: 192 ms
+
+ End-to-end TPS: 54,927 tx/s
+ End-to-end BPS: 10,820,574 B/s
+ End-to-end latency: 3,137 ms
+
+ Crypto TPS: 45,246 tx/s
+ Crypto BPS: 8,913,486 B/s
+ Crypto latency: 25,257 ms
+-----------------------------------------

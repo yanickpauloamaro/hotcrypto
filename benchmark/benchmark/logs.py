@@ -351,7 +351,6 @@ class LogParser:
         commits = self.commits['consensus'].items()
         latency = 0
         for d, c in commits:
-            # if d in self.proposals:
             if c - self.proposals[d] > 0:
                 latency += c - self.proposals[d]
         return latency / len(commits) if commits else 0

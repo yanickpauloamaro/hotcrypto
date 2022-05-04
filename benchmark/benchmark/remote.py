@@ -504,38 +504,43 @@ class Bench:
         cmd = 'ulimit -n 1048575'
         subprocess.run([cmd], shell=True)
 
-        # Run benchmarks.
+        setups = []
         for n in bench_parameters.nodes:
             for r in bench_parameters.rate:
-                Print.heading(f'\nRunning {n} nodes (input rate: {r:,} tx/s)')
-                hosts = selected_hosts[:n]
+                setups += [(n, r)]
+        random.shuffle(setups)
 
-                # Upload all configuration files.
-                # TODOTODO Don't need to recreate config files if I only test one config
+        # Run benchmarks.
+        for n, r in setups:
+            Print.heading(f'\nRunning {n} nodes (input rate: {r:,} tx/s)')
+            random.shuffle(selected_hosts)
+            hosts = selected_hosts[:n]
+
+            # Upload all configuration files.
+            try:
+                self._config(hosts, n, node_parameters)
+            except (subprocess.SubprocessError, GroupException) as e:
+                e = FabricError(e) if isinstance(e, GroupException) else e
+                Print.error(BenchError('Failed to configure nodes', e))
+                continue
+
+            # Do not boot faulty nodes.
+            faults = bench_parameters.faults
+            hosts = hosts[:n-faults]
+
+            # Run the benchmark.
+            for i in range(bench_parameters.runs):
+                Print.heading(f'Run {i+1}/{bench_parameters.runs}')
                 try:
-                    self._config(hosts, n, node_parameters)
-                except (subprocess.SubprocessError, GroupException) as e:
-                    e = FabricError(e) if isinstance(e, GroupException) else e
-                    Print.error(BenchError('Failed to configure nodes', e))
+                    self._run_single(
+                        hosts, r, bench_parameters, node_parameters, debug
+                    )
+                    self._logs(hosts, faults, n).print(PathMaker.result_file(
+                        faults, n, r, bench_parameters.tx_size, self.mode, self.instance_type
+                    ), debug or warmup)
+                except (subprocess.SubprocessError, GroupException, ParseError) as e:
+                    self.kill(hosts=hosts)
+                    if isinstance(e, GroupException):
+                        e = FabricError(e)
+                    Print.error(BenchError('Benchmark failed', e))
                     continue
-
-                # Do not boot faulty nodes.
-                faults = bench_parameters.faults
-                hosts = hosts[:n-faults]
-
-                # Run the benchmark.
-                for i in range(bench_parameters.runs):
-                    Print.heading(f'Run {i+1}/{bench_parameters.runs}')
-                    try:
-                        self._run_single(
-                            hosts, r, bench_parameters, node_parameters, debug
-                        )
-                        self._logs(hosts, faults, n).print(PathMaker.result_file(
-                            faults, n, r, bench_parameters.tx_size, self.mode, self.instance_type
-                        ), debug or warmup)
-                    except (subprocess.SubprocessError, GroupException, ParseError) as e:
-                        self.kill(hosts=hosts)
-                        if isinstance(e, GroupException):
-                            e = FabricError(e)
-                        Print.error(BenchError('Benchmark failed', e))
-                        continue

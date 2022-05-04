@@ -157,6 +157,16 @@ class InstanceManager:
         )
 
     def _get_ami(self, client, default_ami='ami-0c6ebbd55ab05f070'):
+        
+        response = client.describe_images(
+            Filters=[{
+                'Name': 'description',
+                'Values': ['Image with rust and diem installed + hotcrypto pre-compiled']
+            }]
+        )
+
+        return response['Images'][0]['ImageId']
+
         ## NB: Using static AMI. Might need to change that if using multiple regions
         # return default_ami
         saved_ami = 'ami-01b66dd0704d4884d' # AMI/yanick benchmarking
@@ -167,15 +177,6 @@ class InstanceManager:
         # saved_ami = 'ami-02cd6b848b4ebb451' #AMI/Updated
         # snapshot = snap-09aeff7b21cb97ae3
         return saved_ami
-
-        # # The AMI changes with regions.
-        # response = client.describe_images(
-        #     Filters=[{
-        #         'Name': 'description',
-        #         'Values': ['Canonical, Ubuntu, 20.04 LTS, amd64 focal image build on 2020-10-26']
-        #     }]
-        # )
-        # return response['Images'][0]['ImageId']
 
 
     def create_instances(self, nodes):

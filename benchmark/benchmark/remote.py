@@ -267,10 +267,16 @@ class Bench:
 
         names = [x.name for x in keys]
         client_names = [x.name for x in client_keys]    ##
-        # Using private IP to communicate between nodes
-        consensus_addr = [f'{x.private}:{self.settings.consensus_port}' for x in hosts]
-        front_addr = [f'{x.private}:{self.settings.front_port}' for x in hosts]
-        mempool_addr = [f'{x.private}:{self.settings.mempool_port}' for x in hosts]
+        if len(self.settings.aws_regions) > 1:
+            # Using public IP to communicate between nodes
+            consensus_addr = [f'{x.public}:{self.settings.consensus_port}' for x in hosts]
+            front_addr = [f'{x.public}:{self.settings.front_port}' for x in hosts]
+            mempool_addr = [f'{x.public}:{self.settings.mempool_port}' for x in hosts]
+        else:
+            # Using private IP to communicate between nodes
+            consensus_addr = [f'{x.private}:{self.settings.consensus_port}' for x in hosts]
+            front_addr = [f'{x.private}:{self.settings.front_port}' for x in hosts]
+            mempool_addr = [f'{x.private}:{self.settings.mempool_port}' for x in hosts]
         request_ports = [f'{self.settings.request_port}' for x in hosts]    ##
         committee = Committee(names, consensus_addr, front_addr, mempool_addr, request_ports)
         committee.print(PathMaker.committee_file())

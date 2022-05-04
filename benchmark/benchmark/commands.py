@@ -1,6 +1,6 @@
 from os.path import join
 
-from benchmark.utils import PathMaker
+from benchmark.utils import PathMaker, Mode
 
 
 class CommandMaker:
@@ -38,7 +38,7 @@ class CommandMaker:
         assert isinstance(committee, str)
         assert isinstance(parameters, str)
         assert isinstance(register_file, str)
-        assert isinstance(mode, str)
+        assert isinstance(mode, Mode)
         assert isinstance(debug, bool)
         v = '-vvv' if debug else '-vv'
         return (f'./node {v} run --keys {keys} --committee {committee} '
@@ -55,20 +55,20 @@ class CommandMaker:
         assert isinstance(nodes, list)
         assert isinstance(keys, str)
         assert isinstance(register_file, str)
-        assert isinstance(mode, str)
+        assert isinstance(mode, Mode)
         assert all(isinstance(x, str) for x in nodes)
         nodes = f'--nodes {" ".join(nodes)}' if nodes else ''
 
         cmd = [f'./client run --rate {rate} --timeout {timeout} --duration {duration}']
         
         cmd += [f'{mode}']
-        if mode in ['hotstuff']:
+        if mode == Mode.hotstuff:
             cmd += [f'--size {size}']
 
-        if mode in ['hotstuff', 'hotcrypto', 'hotmove']:
+        if mode.has_consensus():
             cmd += [f'{address} {nodes}']
 
-        if mode in ['movevm', 'hotcrypto', 'hotmove']:
+        if mode in [Mode.hotcrypto, Mode.hotmove, Mode.movevm]:
             cmd += [f'--keys {keys} --accounts {register_file}']
 
         return ' '.join(cmd)

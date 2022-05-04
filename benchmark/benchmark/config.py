@@ -171,6 +171,12 @@ class PlotParameters:
                 raise ConfigError('Missing number of nodes')
             self.nodes = [int(x) for x in nodes]
 
+            cores = json['cores']
+            cores = cores if isinstance(cores, list) else [cores]
+            if not cores:
+                cores = ['4']
+            self.cores = [int(x) for x in cores]
+
             self.tx_size = int(json['tx_size'])
 
             faults = json['faults']

@@ -1,5 +1,3 @@
-from atexit import register
-from distutils.command.upload import upload
 from fabric import Connection, ThreadingGroup as Group
 from fabric.exceptions import GroupException
 from paramiko import RSAKey
@@ -9,11 +7,10 @@ from time import sleep
 from math import ceil
 from os.path import join
 import subprocess
-from multiprocessing import Pool
-import tqdm
+import random
 
 from benchmark.config import Committee, Key, NodeParameters, BenchParameters, ConfigError, Register
-from benchmark.utils import BenchError, Print, PathMaker, progress_bar
+from benchmark.utils import BenchError, Print, PathMaker, progress_bar, in_parallel, Mode
 from benchmark.commands import CommandMaker
 from benchmark.logs import LogParser, ParseError
 from benchmark.instance import InstanceManager
@@ -33,12 +30,15 @@ class ExecutionError(Exception):
 
 
 class Bench:
-    def __init__(self, ctx, mode='hotstuff'):
+    def __init__(self, ctx, mode=Mode.default()):
         self.manager = InstanceManager.make()
         self.settings = self.manager.settings
 
         self.instance_type = self.settings.instance_type.replace('.', '_')
-        self.mode = mode
+        if type(mode) == Mode:
+            self.mode = mode
+        else:
+            self.mode = Mode(mode)
 
         self.jobs = 2
         try:
@@ -147,25 +147,11 @@ class Bench:
         cmd = CommandMaker.compress_repo(filename, zip_name)
         subprocess.run([cmd], check=True, shell=True)
 
-        tmp = []
+        args = []
         for i in range(0, len(public_ips)):
-            tmp += [(i, public_ips[i], zip_name, self.manager.settings.key_path)]
-        try:
-            with Pool() as p:
-                for _ in tqdm.tqdm(
-                    p.imap(Bench.send_repo, tmp),
-                    desc="Uploading repo archive",
-                    bar_format='{l_bar}{bar:20}{r_bar}{bar:-10b}',
-                    total=len(tmp)):
-                    pass
-        except (ValueError, IndexError) as e:
-            raise BenchError(f'Failed to upload repo archive: {e}')
+            args += [(i, public_ips[i], zip_name, self.manager.settings.key_path)]
 
-        # Upload configuration files.
-        # progress = progress_bar(public_ips, prefix='Uploading repo:')
-        # for _, host in enumerate(progress):
-        #     c = Connection(host, user='ubuntu', connect_kwargs=self.connect)
-        #     c.put(f'{zip_name}.zip', '.') # TODOTODO move in a function
+        in_parallel(Bench.send_repo, args, 'Uploading repo archive', 'Failed to upload repo archive')
 
         Print.info('Decompressing...')
         decompress = CommandMaker.decompress_repo(self.settings.repo_name)
@@ -193,7 +179,7 @@ class Bench:
 
         # Ensure there are enough hosts.
         hosts = self.manager.hosts()
-        if self.mode == 'movevm':
+        if self.mode == Mode.movevm:
             h = [ip[0] for ip in hosts.values()]
             return h[:1]
         if sum(len(x) for x in hosts.values()) < nodes:
@@ -301,7 +287,11 @@ class Bench:
         g = Group(*public_ips, user='ubuntu', connect_kwargs=self.connect)
         g.run(cmd, hide=True)
 
-        self.send_config_paralell(hosts)
+        args = []
+        for i in range(0, len(hosts)):
+            args += [(i, hosts[i], self.mode, self.manager.settings.key_path)]
+        in_parallel(Bench.send_config, args, 'Uploading config files', 'Failed to upload configs')
+
         # self.send_config_sequential(hosts)
 
         return committee
@@ -316,24 +306,9 @@ class Bench:
             c.put(PathMaker.key_file(i, 'client'), '.')
             c.put(PathMaker.parameters_file(), '.')
             c.put(PathMaker.register_file(), '.')
-
-    def send_config_paralell(self, hosts):
-        tmp = []
-        for i in range(0, len(hosts)):
-            tmp += [(i, hosts[i], self.mode, self.manager.settings.key_path)]
-        try:
-            with Pool() as p:
-                for _ in tqdm.tqdm(
-                    p.imap(Bench.send_host_config, tmp),
-                    desc="Uploading config files",
-                    bar_format='{l_bar}{bar:20}{r_bar}{bar:-10b}',
-                    total=len(tmp)):
-                    pass
-        except (ValueError, IndexError) as e:
-            raise BenchError(f'Failed to upload configs: {e}')
     
     @staticmethod
-    def send_host_config(tmp):
+    def send_config(tmp):
         (i, host, mode, key_path) = tmp
         pkey = RSAKey.from_private_key_file(key_path)
         c = Connection(
@@ -360,7 +335,7 @@ class Bench:
         committee = Committee.load(PathMaker.committee_file())
         addresses = [f'{x.public}:{self.settings.front_port}' for x in hosts]
         rate_share = ceil(rate / committee.size())  # Take faults into account.
-        if self.mode == 'movevm':
+        if self.mode == Mode.movevm:
             rate_share = rate
         timeout = node_parameters.timeout_delay
         client_logs = [PathMaker.client_log_file(i) for i in range(len(hosts))]
@@ -368,21 +343,13 @@ class Bench:
 
         params = zip(hosts, client_key_files, addresses, client_logs)
         indexed = zip(range(0, len(hosts)), params)
-        tmp = [(i, self.mode, self.manager.settings.key_path, \
+        args = [(i, self.mode, self.manager.settings.key_path, \
             rate_share, timeout, addresses, \
                 bench_parameters, param) for i, param in indexed]
-        try:
-            with Pool() as p:
-                for _ in tqdm.tqdm(
-                    p.imap(Bench.boot_client, tmp),
-                    desc="Booting clients",
-                    bar_format='{l_bar}{bar:20}{r_bar}{bar:-10b}',
-                    total=len(tmp)):
-                    pass
-        except (ValueError, IndexError) as e:
-            raise BenchError(f'Failed to boot clients: {e}')
+        
+        in_parallel(Bench.boot_client, args, 'Booting clients', 'Failed to boot clients')
 
-        if self.mode not in ['movevm']:
+        if self.mode != Mode.movevm:
             # Run the nodes.
             key_files = [PathMaker.key_file(i) for i in range(len(hosts))]
             dbs = [PathMaker.db_path(i) for i in range(len(hosts))]
@@ -390,19 +357,11 @@ class Bench:
             
             params = zip(hosts, key_files, dbs, node_logs)
             indexed = zip(range(0, len(hosts)), params)
-            tmp = [(i, self.mode, self.manager.settings.key_path, \
+            args = [(i, self.mode, self.manager.settings.key_path, \
                 debug, self.settings.request_port, \
                     param) for i, param in indexed]
-            try:
-                with Pool() as p:
-                    for _ in tqdm.tqdm(
-                        p.imap(Bench.boot_node, tmp),
-                        desc="Booting nodes",
-                        bar_format='{l_bar}{bar:20}{r_bar}{bar:-10b}',
-                        total=len(tmp)):
-                        pass
-            except (ValueError, IndexError) as e:
-                raise BenchError(f'Failed to boot nodes: {e}')
+            
+            in_parallel(Bench.boot_node, args, 'Booting nodes', 'Failed to boot nodes')
 
             # Wait for the nodes to synchronize
             Print.info('Waiting for the nodes to synchronize...')
@@ -424,8 +383,8 @@ class Bench:
         (host, key_file, addr, log_file) = params
 
         pkey = RSAKey.from_private_key_file(key_path)
-        if mode == 'movevm' and i != 0:
-            # Only run one client for benchmarking MoveVM
+        if mode == Mode.movevm and i != 0:
+            # Only boot one client for benchmarking MoveVM
             return
 
         cmd = CommandMaker.run_client(
@@ -476,24 +435,16 @@ class Bench:
             c.get(
                 PathMaker.client_log_file(i), local=PathMaker.client_log_file(i)
             )
-            if self.mode not in ['movevm']:
+            if self.mode != Mode.movevm:
                 c.get(PathMaker.node_log_file(i), local=PathMaker.node_log_file(i))
 
     def _get_logs_parallel(self, hosts):
-        
-        tmp = []
+        # Download log files.
+        args = []
         for i in range(0, len(hosts)):
-            tmp += [(i, hosts[i], self.mode, self.manager.settings.key_path)]
-        try:
-            with Pool() as p:
-                for _ in tqdm.tqdm(
-                    p.imap(Bench.get_host_logs, tmp),
-                    desc="Downloading logs",
-                    bar_format='{l_bar}{bar:20}{r_bar}{bar:-10b}',
-                    total=len(tmp)):
-                    pass
-        except (ValueError, IndexError) as e:
-            raise BenchError(f'Failed to download logs: {e}')
+            args += [(i, hosts[i], self.mode, self.manager.settings.key_path)]
+
+        in_parallel(Bench.get_host_logs, args, 'Downloading logs', 'Failed to download logs')
     
     @staticmethod
     def get_host_logs(tmp):
@@ -508,7 +459,7 @@ class Bench:
         c.get(
             PathMaker.client_log_file(i), local=PathMaker.client_log_file(i)
         )
-        if mode not in ['movevm']:
+        if mode != Mode.movevm:
             c.get(PathMaker.node_log_file(i), local=PathMaker.node_log_file(i))
 
         return 0

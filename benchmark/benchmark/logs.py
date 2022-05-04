@@ -11,7 +11,7 @@ from benchmark.commands import CommandMaker
 import tqdm
 import threading
 
-from benchmark.utils import Print, PathMaker
+from benchmark.utils import Print, PathMaker, Mode
 
 
 class ParseError(Exception):
@@ -77,7 +77,7 @@ class LogParser:
             self.misses_str = f' {msg}\n'
 
         # Don't parse nodes for MoveVM benchmark (there are none)
-        if self.mode[0] != 'MoveVM':
+        if self.mode[0] != Mode.movevm:
             # Parse the nodes logs.
             try:
                 with Pool(processes=3) as p:
@@ -165,7 +165,16 @@ class LogParser:
             if search(r'Z Error', log) is not None:
                 raise ParseError('Client(s) panicked')
 
-            mode = search(r'Benchmarking (.*)', log).group(1)
+            tmp = search(r'Benchmarking (.*)', log)
+            if tmp == None:
+                raise ParseError('Unable to find mode')
+            
+            mode_str = tmp.group(1).lower()
+            if not mode_str in Mode.possible_values():
+                raise ParseError('Unknown mode')
+            
+            mode = Mode(mode_str)
+            
             cores = int(search(r'Number of cores: (\d+)', log).group(1))
             size = int(search(r'Transactions size: (\d+)', log).group(1))
             rate = int(search(r'Transactions rate: (\d+)', log).group(1))
@@ -186,8 +195,8 @@ class LogParser:
             consensus_samples = self._parse_consensus_client(log)
             currency_samples = self._parse_currency_client(log)
 
-            move_samples, move_commits, move_nb_tx, move_stats = self._parse_move_client(log)
-            
+            move_samples, move_commits, move_nb_tx, move_stats = self._parse_move_client(log) 
+
             return size, rate, start, end, misses, mode, cores, \
                 consensus_samples, currency_samples, \
                 move_samples, move_commits, move_nb_tx, move_stats
@@ -290,15 +299,15 @@ class LogParser:
 
     def _parse_currency_node(self, log):
 
+        if not self.mode[0].has_currency():
+            # Avoid parsing the logs again
+            return dict(), dict(), dict(), dict(), 0
+
         if search(r'\[ .* Some transactions are invalid .*', log) is not None:
             raise ParseError('Faulty transaction signatures.')
         
         tmp = findall(r'\[(.*Z) .* Verified sample transaction (\d+) from (.*)', log)
         received = {(int(s), c): self._to_posix(t) for t, s, c in tmp}
-
-        tmp = findall(r'\[.* WARN .* Crypto output channel reached capacity (\d+) times', log)
-        tmp += [0] # Ensure tmp is not empty
-        crypto_channel_full = max([int(count) for count in tmp])
 
         tmp = findall(r'\[(.*Z) .* Processed sample transaction (\d+) from (.*)', log)
         commits = {(int(s), c): self._to_posix(t) for t, s, c in tmp}
@@ -310,9 +319,12 @@ class LogParser:
         currency_tmp = [(d, (self._to_posix(ts), int(s))) for ts, d, s, tpe in tmp if tpe == 'currency']
         currency_sizes = self._merge_currency_results([currency_tmp])
 
+        tmp = findall(r'\[.* WARN .* Crypto output channel reached capacity (\d+) times', log)
+        tmp += [0] # Ensure tmp is not empty
+        crypto_channel_full = max([int(count) for count in tmp])
+
         return received, commits, crypto_sizes, currency_sizes, crypto_channel_full
 
-    # def _parse_nodes(self, log):
     def _parse_nodes(self, filename):
         with open(filename, 'r') as f:
 
@@ -450,7 +462,7 @@ class LogParser:
 
     def _consensus_result(self):
         consensus_str = ''
-        if self.mode[0] in ['HotStuff', 'HotCrypto', 'HotMove']:
+        if self.mode[0].has_consensus():
             consensus_latency = self._consensus_latency() * 1000
             consensus_tps, consensus_bps, _ = self._consensus_throughput()
             consensus_e2e_latency = self._end_to_end_latency() * 1000
@@ -468,7 +480,7 @@ class LogParser:
 
     def _consensus_config(self):
         config_str = ''
-        if self.mode[0] in ['HotStuff', 'HotCrypto', 'HotMove']:
+        if self.mode[0].has_consensus():
             consensus_timeout_delay = self.configs[0]['consensus']['timeout_delay']
             consensus_sync_retry_delay = self.configs[0]['consensus']['sync_retry_delay']
             mempool_gc_depth = self.configs[0]['mempool']['gc_depth']
@@ -497,7 +509,7 @@ class LogParser:
 
     def _currency_result(self):
         currency_str = ''
-        if self.mode[0] in ['HotCrypto', 'HotMove']:
+        if self.mode[0].has_currency():
             currency_tps, currency_bps, _ = self._crypto_throughput()
             currency_latency = self._crypto_latency() * 1000
             currency_str = (
@@ -507,7 +519,7 @@ class LogParser:
                 f' Crypto latency: {round(currency_latency):,} ms\n'
             )
 
-            if self.mode[0] in ['HotMove']:
+            if self.mode[0] == Mode.hotmove:
                 currency_e2e_tps, currency_e2e_bps, _ = self._currency_throughput()
                 currency_e2e_latency = self._currency_latency() * 1000
                 currency_str = (
@@ -522,7 +534,7 @@ class LogParser:
 
     def _move_results(self):
         move_str = ''
-        if self.mode[0] in ['MoveVM']:
+        if self.mode[0] == Mode.movevm:
             movevm_tps = self._move_throughput()
             movevm_latency = self._move_latency() * 1000
             move_str = (
@@ -549,7 +561,7 @@ class LogParser:
         return (
             '\n'
             '-----------------------------------------\n'
-            f' SUMMARY: {self.mode[0]} {uid}\n'
+            f' SUMMARY: {self.mode[0].print()} {uid}\n'
             '-----------------------------------------\n'
             f'{self._consensus_config()}'
             ' + INFO:\n'

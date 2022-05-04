@@ -1,5 +1,7 @@
 from os.path import join
-
+from multiprocessing import Pool
+from enum import Enum, auto
+import tqdm
 
 class BenchError(Exception):
     def __init__(self, message, error):
@@ -79,10 +81,10 @@ class PathMaker:
         return 'plots'
 
     @staticmethod
-    def agg_file(type, faults, nodes, rate, tx_size, max_latency):
+    def agg_file(type, mode, faults, nodes, rate, tx_size, max_latency, cores):
         return join(
             PathMaker.plots_path(),
-            f'{type}-{faults}-{nodes}-{rate}-{tx_size}-{max_latency}.txt'
+            f'{mode}-{type}-{faults}-{nodes}-{rate}-{tx_size}-{max_latency}-{cores}.txt'
         )
 
     @staticmethod
@@ -145,3 +147,55 @@ def progress_bar(iterable, prefix='', suffix='', decimals=1, length=30, fill='â–
         yield item
         printProgressBar(i + 1)
     print()
+
+
+def in_parallel(fn, args, desc, err_msg):
+    try:
+        with Pool() as p:
+            for _ in tqdm.tqdm(
+                p.imap(fn, args),
+                desc=desc,
+                bar_format='{l_bar}{bar:20}{r_bar}{bar:-10b}',
+                total=len(args)):
+                pass
+    except (ValueError, IndexError) as e:
+        raise BenchError(f'{err_msg}: {e}')
+
+class AutoName(Enum):
+    def _generate_next_value_(name, start, count, last_values):
+        return name
+
+class Mode(str, AutoName):
+    hotstuff = auto()
+    hotcrypto = auto()
+    hotmove = auto()
+    movevm = auto()
+    
+    def __str__(self):
+        return self.name
+    
+    @staticmethod
+    def default():
+        return Mode.hotstuff
+
+    @staticmethod
+    def possible_values():
+        return [m for m in list(Mode)]
+
+    def has_consensus(self):
+        return self in [Mode.hotstuff, Mode.hotcrypto, Mode.hotmove]
+
+    def has_currency(self):
+        return self in [Mode.hotcrypto, Mode.hotmove]
+
+    def print(self):
+        if self == Mode.hotstuff:
+            return 'HotStuff'
+        elif self == Mode.hotcrypto:
+            return 'HotCrypto'
+        elif self == Mode.hotmove:
+            return 'HotMove'
+        elif self == Mode.movevm:
+            return 'MoveVM'
+        else:
+            self.__str__()

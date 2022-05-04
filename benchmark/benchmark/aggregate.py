@@ -6,8 +6,10 @@ from copy import deepcopy
 from os.path import join
 import os
 
-from benchmark.utils import PathMaker
+from benchmark.utils import PathMaker, Mode
 
+class AggegatorError(Exception):
+    pass
 
 class Setup:
     def __init__(self, nodes, rate, tx_size, faults, cores):
@@ -36,13 +38,14 @@ class Setup:
 
     @classmethod
     def from_str(cls, raw):
-        nodes = int(search(r'.* Committee size: (\d+)', raw).group(1))
+        cores = int(search(r'.* Number of cores: (\d+)', raw).group(1))
         rate = int(search(r'.* Input rate: (\d+)', raw).group(1))
+
+        nodes = int(search(r'.* Committee size: (\d+)', raw).group(1))
         tx_size = int(search(r'.* Transaction size: (\d+)', raw).group(1))
         faults = int(search(r'.* Faults: (\d+)', raw).group(1))
-        cores = int(search(r'.* Number of cores: (\d+)', raw).group(1))
-        return cls(nodes, rate, tx_size, faults, cores)
 
+        return cls(nodes, rate, tx_size, faults, cores)
 
 class Result:
     def __init__(self, mean_tps, mean_latency, std_tps=0, std_latency=0):
@@ -58,9 +61,21 @@ class Result:
         )
 
     @classmethod
-    def from_str(cls, raw):
-        tps = int(search(r'.* Currency TPS: (\d+)', raw).group(1))
-        latency = int(search(r'.* Currency latency: (\d+)', raw).group(1))
+    def from_str(cls, raw, mode):
+        if mode == Mode.hotstuff:
+            tps = int(search(r'.* End-to-end TPS: (\d+)', raw).group(1))
+            latency = int(search(r'.* End-to-end latency: (\d+)', raw).group(1))
+        elif mode == Mode.hotcrypto:
+            tps = int(search(r'.* Crypto TPS: (\d+)', raw).group(1))
+            latency = int(search(r'.* Crypto latency: (\d+)', raw).group(1))
+        elif mode == Mode.hotcrypto:
+            tps = int(search(r'.* Currency TPS: (\d+)', raw).group(1))
+            latency = int(search(r'.* Currency latency: (\d+)', raw).group(1))
+        elif mode == Mode.hotcrypto:
+            tps = int(search(r'.* MoveVM TPS: (\d+)', raw).group(1))
+            latency = int(search(r'.* MoveVM latency: (\d+)', raw).group(1))
+        else:
+            raise AggegatorError(f'Unknown mode {mode}')
         return cls(tps, latency)
 
     @classmethod
@@ -76,21 +91,23 @@ class Result:
 
 
 class LogAggregator:
-    def __init__(self, max_latencies):
+    def __init__(self, max_latencies, mode):
         assert isinstance(max_latencies, list)
         assert all(isinstance(x, int) for x in max_latencies)
+        assert mode in Mode.possible_values()
 
         self.max_latencies = max_latencies
+        self.mode = mode
 
         data = ''
-        for filename in glob(join(PathMaker.results_path(), '*.txt')):
+        for filename in glob(join(PathMaker.results_path(), f'bench-{mode}-*.txt')):
             with open(filename, 'r') as f:
                 data += f.read()
 
         records = defaultdict(list)
         for chunk in data.replace(',', '').split('SUMMARY')[1:]:
             if chunk:
-                records[Setup.from_str(chunk)] += [Result.from_str(chunk)]
+                records[Setup.from_str(chunk)] += [Result.from_str(chunk, mode)]
 
         self.records = {k: Result.aggregate(v) for k, v in records.items()}
 
@@ -117,12 +134,14 @@ class LogAggregator:
                     '-----------------------------------------\n'
                 )
                 filename = PathMaker.agg_file(
+                    self.mode,
                     name,
                     setup.faults,
                     setup.nodes, 
                     setup.rate, 
                     setup.tx_size, 
-                    max_latency=setup.max_latency
+                    max_latency=setup.max_latency,
+                    cores=setup.cores
                 )
                 with open(filename, 'w') as f:
                     f.write(string)
@@ -151,6 +170,7 @@ class LogAggregator:
                     nodes = setup.nodes
                     setup.nodes = 'x'
                     setup.rate = 'any'
+                    setup.cores = 'any'
                     setup.max_latency = max_latency
 
                     new_point = all(nodes != x[0] for x in organized[setup])

@@ -56,7 +56,8 @@ class Ploter:
     def _plot(self, x_label, y_label, y_axis, z_axis, type):
         plt.figure()
         markers = cycle(['o', 'v', 's', 'p', 'D', 'P'])
-        self.results.sort(key=self._natural_keys, reverse=(type == 'tps'))
+        self.results.sort(key=self._natural_keys, reverse=('tps' in type))
+        # self.results.sort(key=self._natural_keys, reverse=(type == 'tps'))
         for result in self.results:
             y_values, y_err = y_axis(result)
             x_values = self._variable(result)
@@ -88,11 +89,21 @@ class Ploter:
             plt.savefig(PathMaker.plot_file(type, x), bbox_inches='tight')
 
     @staticmethod
-    def nodes(data):
+    def nodes(data, params):
         x = search(r'Committee size: (\d+)', data).group(1)
         f = search(r'Faults: (\d+)', data).group(1)
-        faults = f'({f} faulty)' if f != '0' else ''
-        return f'{x} nodes {faults}'
+        y = int(search(r'.* Number of cores: (\d+)', data).group(1))
+        faults = f' ({f} faulty)' if f != '0' else ''
+        
+        if len(params.nodes) == 1 and len(params.cores) == 1:
+            return f'{x} nodes{faults} {y} vCPUs'
+
+        res = []
+        if len(params.nodes) > 1:
+            res += [f'{x} nodes{faults}']
+        if len(params.cores) > 1:
+            res += [f' {y} vCPUs']
+        return ''.join(res)
 
     @staticmethod
     def max_latency(data):
@@ -102,27 +113,27 @@ class Ploter:
         return f'Max latency: {float(x) / 1000:,.1f} s {faults}'
 
     @classmethod
-    def plot_robustness(cls, files, tx_size='?'):
+    def plot_robustness(cls, files, params, tx_size='?'):
         assert isinstance(files, list)
         assert all(isinstance(x, str) for x in files)
-        z_axis = cls.nodes
+        z_axis = lambda data: cls.nodes(data, params)
         x_label = 'Input rate (tx/s)'
         y_label = ['Throughput (tx/s)', 'Throughput (MB/s)']
         ploter = cls(files)
         ploter._plot(x_label, y_label, ploter._tps, z_axis, f'robustness ({tx_size} Bytes)')
 
     @classmethod
-    def plot_latency(cls, files, tx_size='?'):
+    def plot_latency(cls, files, params, tx_size='?'):
         assert isinstance(files, list)
         assert all(isinstance(x, str) for x in files)
-        z_axis = cls.nodes
+        z_axis = lambda data: cls.nodes(data, params)
         x_label = 'Throughput (tx/s)'
         y_label = ['Latency (ms)']
         ploter = cls(files)
         ploter._plot(x_label, y_label, ploter._latency, z_axis, f'latency ({tx_size} Bytes)')
 
     @classmethod
-    def plot_tps(cls, files, tx_size='?'):
+    def plot_tps(cls, files, params, tx_size='?'):
         assert isinstance(files, list)
         assert all(isinstance(x, str) for x in files)
         z_axis = cls.max_latency
@@ -132,14 +143,14 @@ class Ploter:
         ploter._plot(x_label, y_label, ploter._tps, z_axis, f'tps ({tx_size} Bytes)')
 
     @classmethod
-    def plot(cls, params_dict):
+    def plot(cls, params_dict, mode):
         try:
             params = PlotParameters(params_dict)
         except PlotError as e:
             raise PlotError('Invalid nodes or bench parameters', e)
 
         # Aggregate the logs.
-        LogAggregator(params.max_latency).print()
+        LogAggregator(params.max_latency, mode).print()
 
         # Load the aggregated log files.
         robustness_files, latency_files, tps_files = [], [], []
@@ -147,18 +158,19 @@ class Ploter:
         
         for f in params.faults:
             for n in params.nodes:
-                robustness_files += glob(
-                    PathMaker.agg_file('robustness', f, n, 'x', tx_size, 'any')
-                )
-                latency_files += glob(
-                    PathMaker.agg_file('latency', f, n, 'any', tx_size, 'any')
-                )
+                for c in params.cores:
+                    robustness_files += glob(
+                        PathMaker.agg_file(mode, 'robustness', f, n, 'x', tx_size, 'any', c)
+                    )
+                    latency_files += glob(
+                        PathMaker.agg_file(mode, 'latency', f, n, 'any', tx_size, 'any', c)
+                    )
             for l in params.max_latency:
                 tps_files += glob(
-                    PathMaker.agg_file('tps', f, 'x', 'any', tx_size, l)
+                    PathMaker.agg_file(mode, 'tps', f, 'x', 'any', tx_size, l, 'any')
                 )
 
         # Make the plots.
-        cls.plot_robustness(robustness_files, tx_size)
-        cls.plot_latency(latency_files, tx_size)
-        cls.plot_tps(tps_files, tx_size)
+        cls.plot_robustness(robustness_files, params, tx_size)
+        cls.plot_latency(latency_files, params, tx_size)
+        cls.plot_tps(tps_files, params, tx_size)

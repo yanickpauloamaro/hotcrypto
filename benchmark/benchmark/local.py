@@ -6,7 +6,7 @@ from time import sleep
 from benchmark.commands import CommandMaker
 from benchmark.config import Key, LocalCommittee, Register, NodeParameters, BenchParameters, ConfigError
 from benchmark.logs import LogParser, ParseError
-from benchmark.utils import Print, BenchError, PathMaker, progress_bar
+from benchmark.utils import Print, BenchError, PathMaker, progress_bar, Mode
 
 
 class LocalBench:
@@ -36,7 +36,8 @@ class LocalBench:
 
     def run(self, mode, debug=False):
         assert isinstance(debug, bool)
-        Print.heading(f'Starting local benchmark of {mode}')
+        mode = Mode(mode)
+        Print.heading(f'Starting local benchmark of {mode.print()}')
 
         # Kill any previous testbed.
         self._kill_nodes()
@@ -91,7 +92,7 @@ class LocalBench:
             # Run the clients (they will wait for the nodes to be ready).
             addresses = committee.front
             request_ports = committee.request_ports
-            rate_share = rate if mode == 'movevm' else ceil(rate / nodes)
+            rate_share = rate if mode == Mode.movevm else ceil(rate / nodes)
             timeout = self.node_parameters.timeout_delay
 
             client_logs = [PathMaker.client_log_file(i) for i in range(nodes)]
@@ -108,11 +109,11 @@ class LocalBench:
                 )
                 self._background_run(cmd, log_file)
 
-                if mode == 'movevm':
+                if mode == Mode.movevm:
                     # Only run one client for benchmarking MoveVM
                     break
 
-            if mode != 'movevm':
+            if mode != Mode.movevm:
                 # Run the nodes.
                 dbs = [PathMaker.db_path(i) for i in range(nodes)]
                 node_logs = [PathMaker.node_log_file(i) for i in range(nodes)]

@@ -195,6 +195,13 @@ class InstanceManager:
         try:
             # Create all instances.
             size = nodes * len(self.clients)
+
+            if size > 100:
+                res = input(f"Are you sure you want to create {size} {self.settings.instance_type} instances? (yes or no)")
+                if res.lower() != 'yes':
+                    print("Canceling instance creation")
+                    return
+
             progress = progress_bar(
                 self.clients.values(), prefix=f'Creating {size} instances ({nodes} nodes per region)'
             )

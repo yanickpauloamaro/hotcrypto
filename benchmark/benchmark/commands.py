@@ -71,6 +71,9 @@ class CommandMaker:
         if mode in [Mode.hotcrypto, Mode.hotmove, Mode.movevm]:
             cmd += [f'--keys {keys} --accounts {register_file}']
 
+        if mode == Mode.diemvm:
+            cmd += ['--with_signature false']
+        
         return ' '.join(cmd)
 
     @staticmethod

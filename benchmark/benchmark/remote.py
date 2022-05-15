@@ -179,7 +179,7 @@ class Bench:
 
         # Ensure there are enough hosts.
         hosts = self.manager.hosts()
-        if self.mode == Mode.movevm:
+        if self.mode.is_vm():
             h = [ip[0] for ip in hosts.values()]
             return h[:1]
         if sum(len(x) for x in hosts.values()) < nodes:
@@ -341,7 +341,7 @@ class Bench:
         committee = Committee.load(PathMaker.committee_file())
         addresses = [f'{x.public}:{self.settings.front_port}' for x in hosts]
         rate_share = ceil(rate / committee.size())  # Take faults into account.
-        if self.mode == Mode.movevm:
+        if self.mode.is_vm():
             rate_share = rate
         timeout = node_parameters.timeout_delay
         client_logs = [PathMaker.client_log_file(i) for i in range(len(hosts))]
@@ -355,7 +355,7 @@ class Bench:
         
         in_parallel(Bench.boot_client, args, 'Booting clients', 'Failed to boot clients')
 
-        if self.mode != Mode.movevm:
+        if not self.mode.is_vm():
             # Run the nodes.
             key_files = [PathMaker.key_file(i) for i in range(len(hosts))]
             dbs = [PathMaker.db_path(i) for i in range(len(hosts))]
@@ -389,7 +389,7 @@ class Bench:
         (host, key_file, addr, log_file) = params
 
         pkey = RSAKey.from_private_key_file(key_path)
-        if mode == Mode.movevm and i != 0:
+        if mode.is_vm() and i != 0:
             # Only boot one client for benchmarking MoveVM
             return
 
@@ -441,7 +441,7 @@ class Bench:
             c.get(
                 PathMaker.client_log_file(i), local=PathMaker.client_log_file(i)
             )
-            if self.mode != Mode.movevm:
+            if not self.mode.is_vm():
                 c.get(PathMaker.node_log_file(i), local=PathMaker.node_log_file(i))
 
     def _get_logs_parallel(self, hosts):
@@ -465,7 +465,7 @@ class Bench:
         c.get(
             PathMaker.client_log_file(i), local=PathMaker.client_log_file(i)
         )
-        if mode != Mode.movevm:
+        if not mode.is_vm():
             c.get(PathMaker.node_log_file(i), local=PathMaker.node_log_file(i))
 
         return 0

@@ -92,7 +92,7 @@ pub fn currency_named_addresses() -> BTreeMap<String, NumericalAddress> {
     mapping
 }
 
-fn currency_module_file() -> String {
+pub fn currency_module_file() -> String {
     let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     path.push("src/currency.move".to_string());
     path.to_str().unwrap().to_string()

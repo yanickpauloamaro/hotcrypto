@@ -170,6 +170,7 @@ class Mode(str, AutoName):
     hotcrypto = auto()
     hotmove = auto()
     movevm = auto()
+    diemvm = auto()
     
     def __str__(self):
         return self.name
@@ -188,6 +189,9 @@ class Mode(str, AutoName):
     def has_currency(self):
         return self in [Mode.hotcrypto, Mode.hotmove]
 
+    def is_vm(self):
+        return self in [Mode.movevm, Mode.diemvm]
+
     def print(self):
         if self == Mode.hotstuff:
             return 'HotStuff'
@@ -197,5 +201,7 @@ class Mode(str, AutoName):
             return 'HotMove'
         elif self == Mode.movevm:
             return 'MoveVM'
+        elif self == Mode.diemvm:
+            return 'DiemVM'
         else:
             self.__str__()

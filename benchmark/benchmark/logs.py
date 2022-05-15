@@ -77,7 +77,7 @@ class LogParser:
             self.misses_str = f' {msg}\n'
 
         # Don't parse nodes for MoveVM benchmark (there are none)
-        if self.mode[0] != Mode.movevm:
+        if not self.mode[0].is_vm():
             # Parse the nodes logs.
             try:
                 with Pool(processes=3) as p:
@@ -220,7 +220,7 @@ class LogParser:
         tmp = findall(r'\[(.*Z) .* Processed sample input (\d+)', log)
         move_commits = {int(s): self._to_posix(t) for t, s in tmp}
 
-        tmp = search(r'\[.*\] MoveVM processed (\d+) inputs', log)
+        tmp = search(r'\[.*\] .* processed (\d+) inputs', log)
         move_nb_tx = 0 if tmp is None else int(tmp.group(1))
 
         stats = []
@@ -532,18 +532,19 @@ class LogParser:
         
         return currency_str
 
-    def _move_results(self):
-        move_str = ''
-        if self.mode[0] == Mode.movevm:
-            movevm_tps = self._move_throughput()
-            movevm_latency = self._move_latency() * 1000
-            move_str = (
-                f' MoveVM TPS: {round(movevm_tps):,} tx/s\n'
-                f' MoveVM latency: {round(movevm_latency):,} ms\n'
+    def _vm_results(self):
+        vm_str = ''
+        if self.mode[0].is_vm():
+            vm_tps = self._move_throughput()
+            vm_latency = self._move_latency() * 1000
+            move_stats = f'{self.move_stats[0]}\n' if self.mode[0] == Mode.movevm else ''
+            vm_str = (
+                f' {self.mode[0].print()} TPS: {round(vm_tps):,} tx/s\n'
+                f' {self.mode[0].print()} latency: {round(vm_latency):,} ms\n'
                 '\n'
-                f'{self.move_stats[0]}\n'
+                f'{move_stats}'
             )
-        return move_str
+        return vm_str
 
     def _warn(self):
         if self.warn:
@@ -576,7 +577,7 @@ class LogParser:
             ' + RESULTS:\n'
             f'{self._consensus_result()}'
             f'{self._currency_result()}'
-            f'{self._move_results()}'
+            f'{self._vm_results()}'
             '-----------------------------------------\n'
         )
 

@@ -92,7 +92,7 @@ class LocalBench:
             # Run the clients (they will wait for the nodes to be ready).
             addresses = committee.front
             request_ports = committee.request_ports
-            rate_share = rate if mode == Mode.movevm else ceil(rate / nodes)
+            rate_share = rate if mode.is_vm() else ceil(rate / nodes)
             timeout = self.node_parameters.timeout_delay
 
             client_logs = [PathMaker.client_log_file(i) for i in range(nodes)]
@@ -109,11 +109,11 @@ class LocalBench:
                 )
                 self._background_run(cmd, log_file)
 
-                if mode == Mode.movevm:
+                if mode.is_vm():
                     # Only run one client for benchmarking MoveVM
                     break
 
-            if mode != Mode.movevm:
+            if not mode.is_vm():
                 # Run the nodes.
                 dbs = [PathMaker.db_path(i) for i in range(nodes)]
                 node_logs = [PathMaker.node_log_file(i) for i in range(nodes)]

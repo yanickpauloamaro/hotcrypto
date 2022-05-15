@@ -373,6 +373,7 @@ impl CryptoVerifier {
     }
 
     async fn do_nothing(mut self) {
+        info!("CryptoVerifier doing nothing");
         while let Some(block) = self.to_verify.recv().await {
 
         }

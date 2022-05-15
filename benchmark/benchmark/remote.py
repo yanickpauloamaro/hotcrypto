@@ -106,6 +106,7 @@ class Bench:
             self._upload(public_ips)
 
             Print.heading(f'Initialized testbed of {len(hosts)} nodes')
+            g.close()
         except (GroupException, ExecutionError) as e:
             e = FabricError(e) if isinstance(e, GroupException) else e
             raise BenchError('Failed to install repo on testbed', e)
@@ -121,7 +122,7 @@ class Bench:
             public_ips = [x.public for x in hosts]
             g = Group(*public_ips, user='ubuntu', connect_kwargs=self.connect)
             g.run(cmd, hide=True)
-
+            g.close()
         except GroupException as e:
             raise BenchError('Failed to kill nodes', FabricError(e))
 
@@ -136,6 +137,7 @@ class Bench:
             public_ips = [x.public for x in hosts]
             g = Group(*public_ips, user='ubuntu', connect_kwargs=self.connect)
             g.run(' && '.join(cmd), hide=True)
+            g.close()
         except GroupException as e:
             raise BenchError('Failed to kill nodes', FabricError(e))
 
@@ -161,24 +163,29 @@ class Bench:
 
         g = Group(*public_ips, user='ubuntu', connect_kwargs=self.connect)
         g.run(' && '.join(cmd), hide=True)
+        g.close()
 
     @staticmethod
     def send_repo(tmp):
-        (i, host, zip_name, key_path) = tmp
+        (i, host_ip, zip_name, key_path) = tmp
         pkey = RSAKey.from_private_key_file(key_path)
         c = Connection(
-            host.public,
+            host_ip,
             user='ubuntu',
             connect_kwargs={
             "pkey": pkey,
         },)
         c.put(f'{zip_name}.zip', '.')
+        c.close()
 
     def _select_hosts(self, bench_parameters):
         nodes = max(bench_parameters.nodes)
 
         # Ensure there are enough hosts.
         hosts = self.manager.hosts()
+        for k in hosts.keys():
+            random.shuffle(hosts[k])
+
         if self.mode.is_vm():
             h = [ip[0] for ip in hosts.values()]
             return h[:1]
@@ -195,6 +202,7 @@ class Bench:
         cmd = f'tmux new -d -s "{name}" "{command} |& tee {log_file}"'
         c = Connection(host.public, user='ubuntu', connect_kwargs=self.connect)
         output = c.run(cmd, hide=True)
+        c.close()
         Bench._check_stderr(output)
 
     @staticmethod
@@ -203,6 +211,7 @@ class Bench:
         cmd = f'tmux new -d -s "{name}" "{command} |& tee {log_file}"'
         c = Connection(host.public, user='ubuntu', connect_kwargs={"pkey": pkey,})
         output = c.run(cmd, hide=True)
+        c.close()
         Bench._check_stderr(output)
 
     def _update(self, hosts):
@@ -230,6 +239,7 @@ class Bench:
         # Using public IP to connect to the instances
         g = Group(*public_ips, user='ubuntu', connect_kwargs=self.connect)
         g.run(' && '.join(cmd), hide=True)
+        g.close()
 
     def _config(self, hosts, nb_accounts, node_parameters):
         Print.info('Generating configuration files...')
@@ -267,16 +277,12 @@ class Bench:
 
         names = [x.name for x in keys]
         client_names = [x.name for x in client_keys]    ##
-        if len(self.settings.aws_regions) > 1:
-            # Using public IP to communicate between nodes
-            consensus_addr = [f'{x.public}:{self.settings.consensus_port}' for x in hosts]
-            front_addr = [f'{x.public}:{self.settings.front_port}' for x in hosts]
-            mempool_addr = [f'{x.public}:{self.settings.mempool_port}' for x in hosts]
-        else:
-            # Using private IP to communicate between nodes
-            consensus_addr = [f'{x.private}:{self.settings.consensus_port}' for x in hosts]
-            front_addr = [f'{x.private}:{self.settings.front_port}' for x in hosts]
-            mempool_addr = [f'{x.private}:{self.settings.mempool_port}' for x in hosts]
+        # Using public IP to communicate between nodes
+        Print.info('Using public IPs...')
+        consensus_addr = [f'{x.public}:{self.settings.consensus_port}' for x in hosts]
+        front_addr = [f'{x.public}:{self.settings.front_port}' for x in hosts]
+        mempool_addr = [f'{x.public}:{self.settings.mempool_port}' for x in hosts]
+        
         request_ports = [f'{self.settings.request_port}' for x in hosts]    ##
         committee = Committee(names, consensus_addr, front_addr, mempool_addr, request_ports)
         committee.print(PathMaker.committee_file())
@@ -292,6 +298,7 @@ class Bench:
         public_ips = [x.public for x in hosts]
         g = Group(*public_ips, user='ubuntu', connect_kwargs=self.connect)
         g.run(cmd, hide=True)
+        g.close()
 
         args = []
         for i in range(0, len(hosts)):
@@ -312,6 +319,7 @@ class Bench:
             c.put(PathMaker.key_file(i, 'client'), '.')
             c.put(PathMaker.parameters_file(), '.')
             c.put(PathMaker.register_file(), '.')
+            c.close()
     
     @staticmethod
     def send_config(tmp):
@@ -328,6 +336,7 @@ class Bench:
         c.put(PathMaker.key_file(i, 'client'), '.')
         c.put(PathMaker.parameters_file(), '.')
         c.put(PathMaker.register_file(), '.')
+        c.close()
 
     def _run_single(self, hosts, rate, bench_parameters, node_parameters, debug=False):
         Print.info('Booting testbed...')
@@ -352,7 +361,7 @@ class Bench:
         args = [(i, self.mode, self.manager.settings.key_path, \
             rate_share, timeout, addresses, \
                 bench_parameters, param) for i, param in indexed]
-        
+
         in_parallel(Bench.boot_client, args, 'Booting clients', 'Failed to boot clients')
 
         if not self.mode.is_vm():
@@ -360,13 +369,13 @@ class Bench:
             key_files = [PathMaker.key_file(i) for i in range(len(hosts))]
             dbs = [PathMaker.db_path(i) for i in range(len(hosts))]
             node_logs = [PathMaker.node_log_file(i) for i in range(len(hosts))]
-            
+
             params = zip(hosts, key_files, dbs, node_logs)
             indexed = zip(range(0, len(hosts)), params)
             args = [(i, self.mode, self.manager.settings.key_path, \
                 debug, self.settings.request_port, \
                     param) for i, param in indexed]
-            
+
             in_parallel(Bench.boot_node, args, 'Booting nodes', 'Failed to boot nodes')
 
             # Wait for the nodes to synchronize
@@ -377,7 +386,7 @@ class Bench:
         duration = bench_parameters.duration
         for _ in progress_bar(range(20), prefix=f'Running benchmark ({duration} sec):'):
             sleep(ceil(duration / 20))
-        
+
         sleep(2) # Make sure the clients have time to stop on their own
         self.kill(hosts=hosts, delete_logs=False)
 
@@ -405,7 +414,7 @@ class Bench:
             nodes=addresses,
         )
         Bench._run_in_background(host, cmd, log_file, pkey)
-    
+
     @staticmethod
     def boot_node(tmp):
         (i, mode, key_path, debug, request_port, params) = tmp
@@ -443,6 +452,7 @@ class Bench:
             )
             if not self.mode.is_vm():
                 c.get(PathMaker.node_log_file(i), local=PathMaker.node_log_file(i))
+            c.close()
 
     def _get_logs_parallel(self, hosts):
         # Download log files.
@@ -467,11 +477,11 @@ class Bench:
         )
         if not mode.is_vm():
             c.get(PathMaker.node_log_file(i), local=PathMaker.node_log_file(i))
-
+        c.close()
         return 0
 
     def _logs(self, hosts, faults, nb_accounts):
-        
+
         self._get_logs(hosts)
 
         # Parse logs and return the parser.
@@ -504,17 +514,20 @@ class Bench:
         cmd = 'ulimit -n 1048575'
         subprocess.run([cmd], shell=True)
 
-        setups = []
-        for n in bench_parameters.nodes:
-            for r in bench_parameters.rate:
-                setups += [(n, r)]
-        random.shuffle(setups)
+        # setups = []
+        # for n in bench_parameters.nodes:
+        #     for r in bench_parameters.rate:
+        #         setups += [(n, r)]
+        # random.shuffle(setups)
 
-        # Run benchmarks.
-        for n, r in setups:
-            Print.heading(f'\nRunning {n} nodes (input rate: {r:,} tx/s)')
-            random.shuffle(selected_hosts)
+        # # Run benchmarks.
+        # for n, r in setups:
+        for n in bench_parameters.nodes:
+            faults = bench_parameters.faults
             hosts = selected_hosts[:n]
+
+            # Do not boot faulty nodes.
+            hosts = hosts[:n-faults]
 
             # Upload all configuration files.
             try:
@@ -524,23 +537,22 @@ class Bench:
                 Print.error(BenchError('Failed to configure nodes', e))
                 continue
 
-            # Do not boot faulty nodes.
-            faults = bench_parameters.faults
-            hosts = hosts[:n-faults]
+            for r in bench_parameters.rate:
+                Print.heading(f'\nRunning {n} nodes (input rate: {r:,} tx/s)')
 
-            # Run the benchmark.
-            for i in range(bench_parameters.runs):
-                Print.heading(f'Run {i+1}/{bench_parameters.runs}')
-                try:
-                    self._run_single(
-                        hosts, r, bench_parameters, node_parameters, debug
-                    )
-                    self._logs(hosts, faults, n).print(PathMaker.result_file(
-                        faults, n, r, bench_parameters.tx_size, self.mode, self.instance_type
-                    ), debug or warmup)
-                except (subprocess.SubprocessError, GroupException, ParseError) as e:
-                    self.kill(hosts=hosts)
-                    if isinstance(e, GroupException):
-                        e = FabricError(e)
-                    Print.error(BenchError('Benchmark failed', e))
-                    continue
+                # Run the benchmark.
+                for i in range(bench_parameters.runs):
+                    Print.heading(f'Run {i+1}/{bench_parameters.runs}')
+                    try:
+                        self._run_single(
+                            hosts, r, bench_parameters, node_parameters, debug
+                        )
+                        self._logs(hosts, faults, n).print(PathMaker.result_file(
+                            faults, n, r, bench_parameters.tx_size, self.mode, self.instance_type
+                        ), debug or warmup)
+                    except (subprocess.SubprocessError, GroupException, ParseError) as e:
+                        self.kill(hosts=hosts)
+                        if isinstance(e, GroupException):
+                            e = FabricError(e)
+                        Print.error(BenchError('Benchmark failed', e))
+                        continue

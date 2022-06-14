@@ -395,8 +395,9 @@ impl FakeExecutor {
         let result = if parallel {
             self.execute_transaction_block_parallel(block)
         } else {
+            // NB: Avoid executing twice during benchmark
             // self.execute_transaction_block_parallel(block).expect("The VM should not fail to startup")
-            DiemVM::execute_block(block, &self.data_store) // TODOTODO Avoid executing twice during benchmark
+            DiemVM::execute_block(block, &self.data_store)
         };
         
         result.expect("The VM should not fail to startup")
@@ -419,9 +420,10 @@ impl FakeExecutor {
             }
         }
 
+        // NB: Avoid executing twice during benchmark
         // let output = DiemVM::execute_block(txn_block.clone(), &self.data_store);
         // let parallel_output = self.execute_transaction_block_parallel(txn_block);
-        // assert_eq!(output, parallel_output); // TODOTODO Avoid executing twice during benchmark
+        // assert_eq!(output, parallel_output);
         let output = self.execute_transaction_block_parallel(txn_block);
 
         if let Some(logger) = &self.executed_output {

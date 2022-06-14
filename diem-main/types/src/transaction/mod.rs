@@ -70,7 +70,7 @@ pub struct RawTransaction {
 
     /// Sequence number of this transaction. This must match the sequence number
     /// stored in the sender's account at the time the transaction executes.
-    pub sequence_number: u64, // TODOTODO Public only for benchmarking
+    pub sequence_number: u64, // NB: Public only for benchmarking
 
     /// The transaction payload, e.g., a script to execute.
     payload: TransactionPayload,
@@ -497,7 +497,7 @@ impl WriteSetPayload {
 #[derive(Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct SignedTransaction {
     /// The raw transaction
-    pub raw_txn: RawTransaction, // TODOTODO Public only for benchmarking
+    pub raw_txn: RawTransaction, // NB: Public only for benchmarking
 
     /// Public key and signature to authenticate
     authenticator: TransactionAuthenticator,
@@ -642,7 +642,7 @@ impl SignedTransaction {
     /// Checks that the signature of given transaction. Returns `Ok(SignatureCheckedTransaction)` if
     /// the signature is valid.
     pub fn check_signature(self) -> Result<SignatureCheckedTransaction> {
-        // self.authenticator.verify(&self.raw_txn)?; // TODOTODO Ignore signatures to test raw speed
+        // self.authenticator.verify(&self.raw_txn)?; // NB: Ignore signatures during benchmark
         Ok(SignatureCheckedTransaction(self))
     }
 

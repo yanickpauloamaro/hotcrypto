@@ -2,7 +2,7 @@ from fabric import task
 
 from benchmark.local import LocalBench
 from benchmark.logs import ParseError, LogParser
-from benchmark.utils import Print, Mode
+from benchmark.utils import Print, Mode, PathMaker
 from benchmark.plot import Ploter, PlotError
 from benchmark.instance import InstanceManager
 from benchmark.remote import Bench, BenchError
@@ -12,11 +12,12 @@ def local(ctx, mode=Mode.default()):
     ''' Run benchmarks on localhost '''
     bench_params = {
         'faults': 0,
-        'nodes': 2,
+        'nodes': 4,
         'rate': 10_000,
-        'tx_size': 512,
-        'duration': 30,
+        'tx_size': 197,
+        'duration': 10,
     }
+
     node_params = {
         'consensus': {
             'timeout_delay': 1_000,
@@ -119,33 +120,12 @@ def remote(ctx, mode):
     ''' Run benchmarks on AWS (N nodes across all regions) '''
     bench_params = {
         'faults': 0,
-        # 'tx_size': 512,
-        'tx_size': 128,
-        'nodes': [4],
-        
-        'rate': [25_000],
+        'tx_size': 197,
+        'nodes': [6],
 
-        ## HotStuff benchmark
-        # 'rate': [25_000, 50_000,  75_000, 100_000, 110_000], # 96 nodes
-        # 'rate': [25_000,          75_000, 100_000,            125_000, 150_000,          200_000], # 48 nodes
-        # 'rate': [25_000,          75_000, 100_000,            125_000, 150_000, 175_000, 200_000, 250_000], # 24 nodes
-        # 'rate': [25_000,          75_000, 100_000,                     150_000,          200_000, 250_000, 300_000], # 12 nodes
-        # 'rate': [25_000,          75_000, 100_000,                     150_000,          200_000, 250_000, 300_000], # 6 nodes
-
-        ## Hotcrypto benchmark
-        # 'rate': [10_000, 20_000, 40_000,  45_000,   50_000, 55_000, 60_000, 65_000], # 4 vCPU
-        # 'rate': [10_000, 20_000, 40_000,            50_000,         60_000,         70_000, 75_000, 80_000, 85_000], # 8 vCPU
-        # 'rate': [10_000,                            50_000,                         70_000,         80_000, 100_000, 110_000], # 16 vCPU
-        # 'rate': [10_000,                            50_000,                                         80_000, 100_000,          120_000], # 36 vCPU
-        
-        ## MoveVM
-        # 'rate': [10_000, 20_000, 60_000, 65_000, 70_000, 75_000,  80_000, 85_000, 90_000, 95_000], # 4 vCPU
-        # 'rate': [10_000, 40_000,                  70_000,         80_000, 85_000, 90_000, 95_000], # 8 vCPU
-        # 'rate': [10_000,                                          80_000, 85_000, 90_000, 95_000], # 16 vCPU
-
-
+        'rate': [1_000, 10_000, 50_000],
         'duration': 120,
-        'runs': 1,
+        'runs': 3,
     }
 
     node_params = {
@@ -177,9 +157,8 @@ def plot(ctx, mode):
     plot_params = {
         'faults': [0],
         'nodes': [6, 12, 24, 48],
-        'cores': [4, 8, 16],
-        # 'nodes': [6, 12, 24, 48, 96],
-        'tx_size': 197,
+        'cores': [4, 8, 16, 36],
+        'tx_size': 128,
         'max_latency': [2_000, 5_000]
     }
     try:
@@ -218,13 +197,13 @@ def warmupremote(ctx):
     ''' Run benchmarks on AWS (N nodes across all regions) '''
     bench_params = {
         'faults': 0,
-        'tx_size': 128,
-        'nodes': [4],
-        'rate': [10_000],
-        'duration': 30,
+        'tx_size': 197,
+        'nodes': [2],
+        'rate': [50],
+        'duration': 60,
         'runs': 1,
     }
-
+    
     node_params = {
         'consensus': {
             'timeout_delay': 5_000,
@@ -239,8 +218,7 @@ def warmupremote(ctx):
         }
     }
 
-    # for mode in Mode.possible_values():
-    for mode in [Mode.hotstuff, Mode.hotcrypto]:
+    for mode in Mode.possible_values():
         try:
             Bench(ctx, mode).run(bench_params, node_params, debug=False, warmup=True)
         except BenchError as e:

@@ -81,6 +81,9 @@ class Bench:
             # This is missing from the Rocksdb installer (needed for Rocksdb).
             'sudo apt-get install -y clang',
 
+            # Clone the repo.
+            f'(git clone {self.settings.repo_url} || (cd {self.settings.repo_name} ; git pull))'
+
             f'sudo apt-get install -y unzip',
             f'sudo apt-get install -y zip',
         ]
@@ -97,15 +100,11 @@ class Bench:
             public_ips = [x.public for x in hosts]
             g = Group(*public_ips, user='ubuntu', connect_kwargs=self.connect)
 
-            Print.info('Installing rust...')
+            Print.info('Installing rust and cloning the repo...')
             g.run(' && '.join(cmd), hide=True)
 
             Print.info('Cloning Diem repo and installing Diem dependencies...')
             g.run(' && '.join(cmd_diem), hide=True)
-
-            # TODOTODO make hotcrypto repo public and clone it instead of zip/sending it
-            # Print.info('Uploading repo...')
-            # self._upload(public_ips)
 
             Print.heading(f'Initialized testbed of {len(hosts)} nodes')
             g.close()
@@ -142,43 +141,6 @@ class Bench:
             g.close()
         except GroupException as e:
             raise BenchError('Failed to kill nodes', FabricError(e))
-
-    def _upload(self, public_ips):
-        Print.info('Compressing repo...')
-
-        filename = self.settings.repo_name
-        zip_name = self.settings.repo_name
-        cmd = CommandMaker.compress_repo(filename, zip_name)
-        subprocess.run([cmd], check=True, shell=True)
-
-        args = []
-        for i in range(0, len(public_ips)):
-            args += [(i, public_ips[i], zip_name, self.manager.settings.key_path)]
-
-        in_parallel(Bench.send_repo, args, 'Uploading repo archive', 'Failed to upload repo archive')
-
-        Print.info('Decompressing...')
-        decompress = CommandMaker.decompress(self.settings.repo_name)
-        cmd = [
-            f'(({decompress}) || true)'
-        ]
-
-        g = Group(*public_ips, user='ubuntu', connect_kwargs=self.connect)
-        g.run(' && '.join(cmd), hide=True)
-        g.close()
-
-    @staticmethod
-    def send_repo(tmp):
-        (i, host_ip, zip_name, key_path) = tmp
-        pkey = RSAKey.from_private_key_file(key_path)
-        c = Connection(
-            host_ip,
-            user='ubuntu',
-            connect_kwargs={
-            "pkey": pkey,
-        },)
-        c.put(f'{zip_name}.zip', '.')
-        c.close()
 
     def _select_hosts(self, bench_parameters):
         nodes = max(bench_parameters.nodes)
@@ -221,39 +183,20 @@ class Bench:
         # Using public IP to connect to the instances
         public_ips = [x.public for x in hosts]
 
-        cmd = []
-        if self.mode == Mode.hotstuff:
-            Print.info(
-                f'Updating {len(hosts)} nodes (branch "main" of hotstuff)...'
-            )
-            cmd = [
-                f'(cd hotstuff && git fetch -f)',
-                f'(cd hotstuff && git checkout -f main)',
-                f'(cd hotstuff && git pull -f)',
-                'source $HOME/.cargo/env',
-                f'(cd hotstuff/node && {CommandMaker.compile()})',
-                CommandMaker.alias_binaries(
-                    f'./hotstuff/target/release/'
-                )
-            ]
-        else:
-            Print.info(
-                f'Updating {len(hosts)} nodes...'
-            )
+        Print.info(
+            f'Updating {len(hosts)} nodes...'
+        )
 
-            # TODOTODO make hotcrypto repo public and pull new changes instead of reuploading
-            # Reupload code (Only need to reupload if there was any changes to rust code)
-            self._upload(public_ips)
-
-            # Recompile code
-            Print.info(f'Recompiling with {self.jobs} jobs...')
-            cmd = [
-                'source $HOME/.cargo/env',
-                f'(cd {self.settings.repo_name}/node && {CommandMaker.compile(self.jobs)})',
-                CommandMaker.alias_binaries(
-                    f'./{self.settings.repo_name}/target/release/'
-                )
-            ]
+        cmd = [
+            f'(cd {self.settings.repo_name} && git fetch -f)',
+            f'(cd {self.settings.repo_name} && git checkout -f {self.settings.branch})',
+            f'(cd {self.settings.repo_name} && git pull -f)',
+            'source $HOME/.cargo/env',
+            f'(cd {self.settings.repo_name}/node && {CommandMaker.compile()})',
+            CommandMaker.alias_binaries(
+                f'./{self.settings.repo_name}/target/release/'
+            )
+        ]
 
         # Using public IP to connect to the instances
         g = Group(*public_ips, user='ubuntu', connect_kwargs=self.connect)

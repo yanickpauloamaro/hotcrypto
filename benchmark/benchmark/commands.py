@@ -87,16 +87,6 @@ class CommandMaker:
         return f'rm node ; rm client ; ln -s {node} . ; ln -s {client} .'
 
     @staticmethod
-    def compress_repo(repo, zip_name):
-        assert isinstance(repo, str)
-        assert isinstance(zip_name, str)
-        zip_name = zip_name if '.zip' in zip_name else f'{zip_name}.zip'
-        return (f'(cd .. && cd .. &&  zip -r {repo}/benchmark/{zip_name} {repo} -q '
-                '-x "**/target/*" -x "*/\db_*" -x "*/\.git*" -x "*/\.db-*" '
-                '-x "*/\\benchmark/*"'
-                ')')
-
-    @staticmethod
     def compress(sources, zip_name, flat=False):
         assert isinstance(sources, list)
         assert len(sources) != 0

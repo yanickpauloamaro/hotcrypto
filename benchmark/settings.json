@@ -1,8 +1,8 @@
 {
-    "testbed": "hotstuff",
+    "testbed": "hotcrypto",
     "key": {
-        "name": "yanick/desktop",
-        "path": "/home/phelinx/.ssh/aws"
+        "name": "aws",
+        "path": "/absolute/key/path"
     },
     "ports": {
         "consensus": 8000,
@@ -13,7 +13,7 @@
     "repo": {
         "name": "hotcrypto",
         "url": "https://github.com/yanickpauloamaro/hotcrypto.git",
-        "branch": "benchmark-hotcrypto-baseline"
+        "branch": "main"
     },
     "instances": {
         "type": "c5.xlarge",

@@ -344,7 +344,7 @@ impl DiemVM {
                 return discard_error_vm_status(err);
             }
         }
-        //TODOTODOTODOTODO
+
         // Revalidate the transaction.
         let mut session = self.0.new_session(storage);
         if let Err(err) = validate_signature_checked_transaction::<S, Self>(

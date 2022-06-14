@@ -1,6 +1,6 @@
 from re import search
 from collections import defaultdict
-from statistics import mean, stdev
+from statistics import mean, stdev, median
 from glob import glob
 from copy import deepcopy
 from os.path import join
@@ -37,13 +37,18 @@ class Setup:
         return hash(str(self))
 
     @classmethod
-    def from_str(cls, raw):
+    def from_str(cls, raw, mode):
         cores = int(search(r'.* Number of cores: (\d+)', raw).group(1))
         rate = int(search(r'.* Input rate: (\d+)', raw).group(1))
 
-        nodes = int(search(r'.* Committee size: (\d+)', raw).group(1))
-        tx_size = int(search(r'.* Transaction size: (\d+)', raw).group(1))
-        faults = int(search(r'.* Faults: (\d+)', raw).group(1))
+        if Mode(mode).is_vm():
+            nodes = 1
+            tx_size = 1
+            faults = 0
+        else:
+            nodes = int(search(r'.* Committee size: (\d+)', raw).group(1))
+            tx_size = int(search(r'.* Transaction size: (\d+)', raw).group(1))
+            faults = int(search(r'.* Faults: (\d+)', raw).group(1))
 
         return cls(nodes, rate, tx_size, faults, cores)
 
@@ -68,14 +73,19 @@ class Result:
         elif mode == Mode.hotcrypto:
             tps = int(search(r'.* Crypto TPS: (\d+)', raw).group(1))
             latency = int(search(r'.* Crypto latency: (\d+)', raw).group(1))
-        elif mode == Mode.hotcrypto:
+        elif mode == Mode.hotmove:
             tps = int(search(r'.* Currency TPS: (\d+)', raw).group(1))
             latency = int(search(r'.* Currency latency: (\d+)', raw).group(1))
-        elif mode == Mode.hotcrypto:
+        elif mode == Mode.movevm:
             tps = int(search(r'.* MoveVM TPS: (\d+)', raw).group(1))
             latency = int(search(r'.* MoveVM latency: (\d+)', raw).group(1))
+        elif mode == Mode.diemvm:
+            tps = int(search(r'.* DiemVM TPS: (\d+)', raw).group(1))
+            latency = int(search(r'.* DiemVM latency: (\d+)', raw).group(1))
         else:
-            raise AggegatorError(f'Unknown mode {mode}')
+            tps = int(search(r'.* Diem TPS: (\d+)', raw).group(1))
+            latency = int(search(r'.* Diem latency: (\d+)', raw).group(1))
+            # raise AggegatorError(f'Unknown mode {mode}')
         return cls(tps, latency)
 
     @classmethod
@@ -94,7 +104,7 @@ class LogAggregator:
     def __init__(self, max_latencies, mode):
         assert isinstance(max_latencies, list)
         assert all(isinstance(x, int) for x in max_latencies)
-        assert mode in Mode.possible_values()
+        # assert mode in Mode.possible_values()
 
         self.max_latencies = max_latencies
         self.mode = mode
@@ -107,7 +117,7 @@ class LogAggregator:
         records = defaultdict(list)
         for chunk in data.replace(',', '').split('SUMMARY')[1:]:
             if chunk:
-                records[Setup.from_str(chunk)] += [Result.from_str(chunk, mode)]
+                records[Setup.from_str(chunk, mode)] += [Result.from_str(chunk, mode)]
 
         self.records = {k: Result.aggregate(v) for k, v in records.items()}
 

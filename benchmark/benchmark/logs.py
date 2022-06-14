@@ -9,7 +9,6 @@ import uuid
 import subprocess
 from benchmark.commands import CommandMaker
 import tqdm
-import threading
 
 from benchmark.utils import Print, PathMaker, Mode
 
@@ -48,7 +47,7 @@ class LogParser:
             move_samples, move_commits, self.move_nb_tx, self.move_stats \
             = zip(*results)
         self.misses = sum(misses)
-        
+
         self.start = min(start)
         self.end = max(end)
         self.duration = self.end - self.start
@@ -58,7 +57,7 @@ class LogParser:
         self.timeouts_str = ''
         self.crypto_channel_str = ''
         self.consensus_channel_str = ''
-        
+
         self.sent = {
             'consensus': consensus_samples,
             'crypto': currency_samples,
@@ -93,7 +92,7 @@ class LogParser:
             timeouts, self.configs, consensus_received, \
             currency_received, currency_commits, crypto_sizes, \
             currency_sizes, consensus_channel_full, crypto_channel_full = zip(*results)
-            
+
             self.crypto_channel_full = sum(crypto_channel_full)
             self.consensus_channel_full = sum(consensus_channel_full)
             self.proposals = self._merge_results([x.items() for x in consensus_proposals])
@@ -133,7 +132,7 @@ class LogParser:
                 self.warn = True
                 Print.warn(msg)
                 self.consensus_channel_str = f' {msg}\n'
-            
+
             msg = f'Crypto waited on Currency {self.crypto_channel_full:,} time(s)'
             if self.crypto_channel_full != 0:
                 self.warn = True
@@ -168,18 +167,21 @@ class LogParser:
             tmp = search(r'Benchmarking (.*)', log)
             if tmp == None:
                 raise ParseError('Unable to find mode')
-            
+
             mode_str = tmp.group(1).lower()
             if not mode_str in Mode.possible_values():
                 raise ParseError('Unknown mode')
-            
-            mode = Mode(mode_str)
-            
+
+            mode = Mode(mode_str) ##
+            # mode = Mode('hotstuff') ## Hotstuff
+
             cores = int(search(r'Number of cores: (\d+)', log).group(1))
+            # cores = 4 ## Hotstuff
             size = int(search(r'Transactions size: (\d+)', log).group(1))
             rate = int(search(r'Transactions rate: (\d+)', log).group(1))
 
-            tmp = search(r'\[(.*Z) .* Start sending', log).group(1)
+            tmp = search(r'\[(.*Z) .* Start sending', log).group(1) ##
+            # tmp = search(r'\[(.*Z) .* Start ', log).group(1) ## Hotstuff
             start = self._to_posix(tmp)
 
             tmp = search(r'\[(.*Z) .* Stop sending ', log)
@@ -239,11 +241,11 @@ class LogParser:
         tmp = search(r'\[.*\]( MoveVM execution time: .*)', log)
         stats += [] if tmp is None else [tmp.group(1)]
 
-        
+
         return move_samples, move_commits, move_nb_tx, '\n'.join(stats)
 
     def _parse_consensus_node(self, log):
-        
+
         tmp = findall(r'\[(.*Z) .* Created B\d+ -> ([^ ]+=)', log)
         tmp = [(d, self._to_posix(t)) for t, d in tmp]
         proposals = self._merge_results([tmp])
@@ -251,7 +253,7 @@ class LogParser:
         tmp = findall(r'\[(.*Z) .* Committed B\d+ -> ([^ ]+=)', log)
         tmp = [(d, self._to_posix(t)) for t, d in tmp]
         commits = self._merge_results([tmp])
-        
+
         tmp = findall(r'\[.* Batch ([^ ]+) contains (\d+) B', log)
         sizes = {d: int(s) for d, s in tmp}
 
@@ -305,17 +307,17 @@ class LogParser:
 
         if search(r'\[ .* Some transactions are invalid .*', log) is not None:
             raise ParseError('Faulty transaction signatures.')
-        
+
         tmp = findall(r'\[(.*Z) .* Verified sample transaction (\d+) from (.*)', log)
         received = {(int(s), c): self._to_posix(t) for t, s, c in tmp}
 
         tmp = findall(r'\[(.*Z) .* Processed sample transaction (\d+) from (.*)', log)
         commits = {(int(s), c): self._to_posix(t) for t, s, c in tmp}
-        
+
         tmp = findall(r'\[(.*Z) .* Batch ([^ ]+) contains (\d+) (.*) tx', log)
         crypto_tmp = [(d, (self._to_posix(ts), int(s))) for ts, d, s, tpe in tmp if tpe == 'crypto']
         crypto_sizes = self._merge_currency_results([crypto_tmp])
-        
+
         currency_tmp = [(d, (self._to_posix(ts), int(s))) for ts, d, s, tpe in tmp if tpe == 'currency']
         currency_sizes = self._merge_currency_results([currency_tmp])
 
@@ -353,7 +355,7 @@ class LogParser:
             return 0, 0, 0
         start, end = min(self.proposals.values()), max(self.commits['consensus'].values())
         duration = end - start
-        
+
         bytes = sum(self.sizes['consensus'].values())
         bps = bytes / duration
         tps = bps / self.tx_size[0]
@@ -366,7 +368,8 @@ class LogParser:
             if c - self.proposals[d] > 0:
                 latency += c - self.proposals[d]
         return latency / len(commits) if commits else 0
-        
+
+        # Sometimes yields negative latency
         latency = [c - self.proposals[d] for d, c in self.commits['consensus'].items()]
         return mean(latency) if latency else 0
 
@@ -430,7 +433,6 @@ class LogParser:
         for sent, received in zip(self.sent[mode], self.received[mode]):
             # Compute latency for transactions sent by this client
             for (sample, client), ts in received.items():
-                
                 if (sample, client) in self.commits[mode]:
                     if (sample, client) in sent:
                         start = sent[(sample, client)]
@@ -445,9 +447,9 @@ class LogParser:
         duration = self.duration
         return self.move_nb_tx[0]/duration
 
-    def _move_latency(self):  ##
+    def _move_latency(self):
         latency = []
-        
+
         sent = self.sent['move'][0]
         received = self.received['move'][0]
 
@@ -456,8 +458,7 @@ class LogParser:
             start = sent[sample]
             end = ts
             latency += [end-start]
-            # print('sample', sample, f'had {round(end-start)}s of latency')
-        
+
         return mean(latency) if latency else 0
 
     def _consensus_result(self):
@@ -529,7 +530,7 @@ class LogParser:
                     f' Currency BPS: {round(currency_e2e_bps):,} B/s\n'
                     f' Currency latency: {round(currency_e2e_latency):,} ms\n'
                 )
-        
+
         return currency_str
 
     def _vm_results(self):
@@ -591,16 +592,22 @@ class LogParser:
         path = PathMaker.save_path(params, uid, debug)
 
         Print.info(f'Saving to {path}/...')
+        # dir/params/uid/uid.zip
         cmd = CommandMaker.save_logs(params, uid, debug)
         subprocess.run([cmd], shell=True)
 
         result = self.result(uid)
+        # dir/params/uid/result.txt
         with open(f'{path}/result.txt', 'a') as f:
+            f.write(result)
+        
+        # dir/params.txt (append)
+        with open(f'{PathMaker.nas_path()}/{tmp}', 'a') as f:
             f.write(result)
 
         if debug:
             filename = f'{PathMaker.debug_path()}/{tmp}'
-        Print.info(f'Saving to {filename}...')
+        Print.info(f'Result file: {filename}')
         with open(filename, 'a') as f:
             f.write(result)
 

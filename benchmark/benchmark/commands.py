@@ -16,7 +16,14 @@ class CommandMaker:
         return f'rm -r {PathMaker.logs_path()} ; mkdir -p {PathMaker.logs_path()}'
     
     @staticmethod
-    def save_logs(params, uid, debug=False):
+    def save_logs(params, uid, debug=False, error=False):
+        sources = [f'{PathMaker.logs_path()}/*.log']
+        zip_name = f'{PathMaker.save_path(params, uid, debug, error)}/{uid}'
+        cmd = [
+            f'mkdir -p {PathMaker.save_path(params, uid, debug, error)}',
+            CommandMaker.compress(sources, zip_name),
+        ]
+        return '; '.join(cmd)
         return (
             f'mkdir -p {PathMaker.save_path(params, uid, debug)} ; '
             f'cp -r logs/*.log {PathMaker.save_path(params, uid, debug)}/'
@@ -44,6 +51,8 @@ class CommandMaker:
         return (f'./node {v} run --keys {keys} --committee {committee} '
                 f'--store {store} --parameters {parameters} --port {port} --accounts {register_file} '
                 f'{mode}')
+        # return (f'./node {v} run --keys {keys} --committee {committee} '
+                # f'--store {store} --parameters {parameters}') ## HotStuff
 
     @staticmethod
     def run_client(address, size, rate, timeout, duration, keys, register_file, mode, nodes=[]):
@@ -74,7 +83,10 @@ class CommandMaker:
         if mode == Mode.diemvm:
             cmd += ['--with_signature false']
         
+        print(' '.join(cmd))
         return ' '.join(cmd)
+        # return (f'./client {address} --size {size} '
+                # f'--rate {rate} --timeout {timeout} {nodes}') ## HotStuff
 
     @staticmethod
     def kill():
@@ -87,20 +99,40 @@ class CommandMaker:
         return f'rm node ; rm client ; ln -s {node} . ; ln -s {client} .'
 
     @staticmethod
-    def remove_repo(filename):
-        assert isinstance(filename, str)
-        return f'rm -r {filename}'
-
-    @staticmethod
     def compress_repo(repo, zip_name):
         assert isinstance(repo, str)
         assert isinstance(zip_name, str)
-        return (f'(cd .. && cd .. &&  zip -r {repo}/benchmark/{zip_name}.zip {repo} -q '
+        zip_name = zip_name if '.zip' in zip_name else f'{zip_name}.zip'
+        return (f'(cd .. && cd .. &&  zip -r {repo}/benchmark/{zip_name} {repo} -q '
                 '-x "**/target/*" -x "*/\db_*" -x "*/\.git*" -x "*/\.db-*" '
                 '-x "*/\\benchmark/*"'
                 ')')
 
     @staticmethod
-    def decompress_repo(zip_name):
+    def compress(sources, zip_name, flat=False):
+        assert isinstance(sources, list)
+        assert len(sources) != 0
+        assert all(isinstance(x, str) for x in sources)
         assert isinstance(zip_name, str)
-        return f'unzip -uo {zip_name}.zip'
+        zip_name = zip_name if '.zip' in zip_name else f'{zip_name}.zip'
+        s = ' '.join(sources)
+        arg = ' -j' if flat else ''
+        return (
+            f'zip {zip_name} {s} -FSq'
+            f'{arg}'
+            )
+
+    @staticmethod
+    def decompress(zip_name, into=None):
+        assert isinstance(zip_name, str)
+        zip_name = zip_name if '.zip' in zip_name else f'{zip_name}.zip'
+        dir = '' if into is None else f' -d {into}'
+        return (
+            f'unzip -uoq {zip_name}'
+            f'{dir}'
+            )
+
+    @staticmethod
+    def remove(filename):
+        assert isinstance(filename, str)
+        return f'rm -r {filename}'

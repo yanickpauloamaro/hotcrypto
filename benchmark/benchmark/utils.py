@@ -49,11 +49,31 @@ class PathMaker:
     @staticmethod
     def debug_path():
         return 'debug'
+        # return '/run/user/1000/gvfs/smb-share:server=minicloud.local,share=dcl/debug' ## TODOTODO
 
     @staticmethod
-    def save_path(params, uid, debug=False):
-        dir = f'{PathMaker.debug_path()}' if debug else 'saved'
+    def nas_path(): #TODOTODO Remove this
+        # return '/run/user/1000/gvfs/smb-share:server=minicloud.local,share=yanick/project_backup/clean_results'
+        return '/run/user/1000/gvfs/smb-share:server=minicloud.local,share=dcl/saved'
+
+    @staticmethod
+    def fail_path():
+        # return 'fail'
+        return '/run/user/1000/gvfs/smb-share:server=minicloud.local,share=dcl/fail' ## TODOTODO
+
+
+    @staticmethod
+    def save_path(params, uid, debug=False, error=False):
+        # dir = f'{PathMaker.debug_path()}' if debug else 'saved'
+        dir = f'{PathMaker.debug_path()}' if debug else f'{PathMaker.nas_path()}' ##TODOTOOD Save to nas
+        dir = f'{PathMaker.fail_path()}' if error else dir
         return f'{dir}/{params}/{uid}'
+
+    @staticmethod
+    def log_files(i):
+        assert isinstance(i, int) and i >= 0
+        return [PathMaker.client_log_file(i), PathMaker.node_log_file(i)]
+    
 
     @staticmethod
     def node_log_file(i):

@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from fabric import Connection, ThreadingGroup as Group
 from fabric.exceptions import GroupException
 from paramiko import RSAKey
@@ -5,9 +7,9 @@ from paramiko.ssh_exception import PasswordRequiredException, SSHException
 from os.path import basename, splitext
 from time import sleep
 from math import ceil
-from os.path import join
 import subprocess
 import random
+import uuid
 
 from benchmark.config import Committee, Key, NodeParameters, BenchParameters, ConfigError, Register
 from benchmark.utils import BenchError, Print, PathMaker, progress_bar, in_parallel, Mode
@@ -67,19 +69,22 @@ class Bench:
             'sudo apt-get -y upgrade',
             'sudo apt-get -y autoremove',
 
-            # The following dependencies prevent the error: [error: linker `cc` not found].
-            'sudo apt-get -y install build-essential',
-            'sudo apt-get -y install cmake',
+            # # The following dependencies prevent the error: [error: linker `cc` not found].
+            # 'sudo apt-get -y install build-essential',
+            # 'sudo apt-get -y install cmake',
 
-            # Install rust (non-interactive).
-            'curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y',
-            'source $HOME/.cargo/env',
-            'rustup default stable',
+            # # Install rust (non-interactive).
+            # 'curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y',
+            # 'source $HOME/.cargo/env',
+            # 'rustup default stable',
 
-            # This is missing from the Rocksdb installer (needed for Rocksdb).
-            'sudo apt-get install -y clang',
+            # # This is missing from the Rocksdb installer (needed for Rocksdb).
+            # 'sudo apt-get install -y clang',
 
-            f'sudo apt-get install -y unzip',            
+            f'sudo apt-get install -y unzip',
+            f'sudo apt-get install -y zip',
+
+            f'(git clone https://github.com/asonnino/hotstuff.git || (cd hotstuff ; git pull))' ## TODOTODO remove after benchmarking
         ]
 
         cmd_diem = [
@@ -91,19 +96,21 @@ class Bench:
         hosts = self.manager.hosts(flat=True)
 
         try:
-            ## Using public IP to connect to the instances
             public_ips = [x.public for x in hosts]
             g = Group(*public_ips, user='ubuntu', connect_kwargs=self.connect)
-
-            Print.info('Installing rust...')
+            
+            Print.info('Apt update, cloning hotstuff and installing zip...') # TODOTODO remove 
             g.run(' && '.join(cmd), hide=True)
 
-            Print.info('Cloning Diem repo and installing Diem dependencies...')
-            g.run(' && '.join(cmd_diem), hide=True)
+            # Print.info('Installing rust...')
+            # g.run(' && '.join(cmd), hide=True)
+
+            # Print.info('Cloning Diem repo and installing Diem dependencies...')
+            # g.run(' && '.join(cmd_diem), hide=True) # TODOTODO
 
             # TODOTODO make hotcrypto repo public and clone it instead of zip/sending it
-            Print.info('Uploading repo...')
-            self._upload(public_ips)
+            # Print.info('Uploading repo...')
+            # self._upload(public_ips)
 
             Print.heading(f'Initialized testbed of {len(hosts)} nodes')
             g.close()
@@ -116,7 +123,7 @@ class Bench:
         filename = self.settings.repo_name
 
         try:
-            cmd = f'{CommandMaker.remove_repo(filename)} || true'
+            cmd = f'{CommandMaker.remove(filename)} || true'
 
             # Using public IP to connect to the instances
             public_ips = [x.public for x in hosts]
@@ -156,7 +163,7 @@ class Bench:
         in_parallel(Bench.send_repo, args, 'Uploading repo archive', 'Failed to upload repo archive')
 
         Print.info('Decompressing...')
-        decompress = CommandMaker.decompress_repo(self.settings.repo_name)
+        decompress = CommandMaker.decompress(self.settings.repo_name)
         cmd = [
             f'(({decompress}) || true)'
         ]
@@ -215,26 +222,43 @@ class Bench:
         Bench._check_stderr(output)
 
     def _update(self, hosts):
-        Print.info(
-            f'Updating {len(hosts)} nodes...'
-        )
 
         # Using public IP to connect to the instances
         public_ips = [x.public for x in hosts]
 
-        # TODOTODO make hotcrypto repo public and pull new changes instead of reuploading
-        ## Reupload code (Only need to reupload if there was any changes to rust code)
-        # self._upload(public_ips)
-
-        ## Recompile code
-        Print.info(f'Recompiling with {self.jobs} jobs...')
-        cmd = [
-            'source $HOME/.cargo/env',
-            f'(cd {self.settings.repo_name}/node && {CommandMaker.compile(self.jobs)})',
-            CommandMaker.alias_binaries(
-                f'./{self.settings.repo_name}/target/release/'
+        cmd = []
+        if self.mode == Mode.hotstuff:
+            Print.info(
+                f'Updating {len(hosts)} nodes (branch "main" of hotstuff)...'
             )
-        ]
+            cmd = [
+                f'(cd hotstuff && git fetch -f)',
+                f'(cd hotstuff && git checkout -f main)',
+                f'(cd hotstuff && git pull -f)',
+                'source $HOME/.cargo/env',
+                f'(cd hotstuff/node && {CommandMaker.compile()})',
+                CommandMaker.alias_binaries(
+                    f'./hotstuff/target/release/'
+                )
+            ]
+        else:
+            Print.info(
+                f'Updating {len(hosts)} nodes...'
+            )
+
+            # TODOTODO make hotcrypto repo public and pull new changes instead of reuploading
+            # Reupload code (Only need to reupload if there was any changes to rust code)
+            self._upload(public_ips)
+
+            # Recompile code
+            Print.info(f'Recompiling with {self.jobs} jobs...')
+            cmd = [
+                'source $HOME/.cargo/env',
+                f'(cd {self.settings.repo_name}/node && {CommandMaker.compile(self.jobs)})',
+                CommandMaker.alias_binaries(
+                    f'./{self.settings.repo_name}/target/release/'
+                )
+            ]
 
         # Using public IP to connect to the instances
         g = Group(*public_ips, user='ubuntu', connect_kwargs=self.connect)
@@ -249,7 +273,7 @@ class Bench:
         subprocess.run([cmd], shell=True, stderr=subprocess.DEVNULL)
 
         # Recompile the latest code.
-        Print.info('Recompiling...')
+        Print.info('Recompiling locally...')
         cmd = CommandMaker.compile(self.jobs).split()
         subprocess.run(cmd, check=True, cwd=PathMaker.node_crate_path())
 
@@ -266,7 +290,7 @@ class Bench:
             subprocess.run(cmd, check=True)
             keys += [Key.from_file(filename)]
 
-        # Generate configuration files for clients. ##
+        # Generate configuration files for clients.
         client_keys = []
         client_key_files = [PathMaker.key_file(i, 'client') for i in range(nb_accounts)]
         progress = progress_bar(client_key_files, prefix='Generating client keys:')
@@ -276,18 +300,27 @@ class Bench:
             client_keys += [Key.from_file(filename)]
 
         names = [x.name for x in keys]
-        client_names = [x.name for x in client_keys]    ##
-        # Using public IP to communicate between nodes
-        Print.info('Using public IPs...')
-        consensus_addr = [f'{x.public}:{self.settings.consensus_port}' for x in hosts]
-        front_addr = [f'{x.public}:{self.settings.front_port}' for x in hosts]
-        mempool_addr = [f'{x.public}:{self.settings.mempool_port}' for x in hosts]
-        
-        request_ports = [f'{self.settings.request_port}' for x in hosts]    ##
+        client_names = [x.name for x in client_keys]
+
+        if len(self.settings.aws_regions) == 1:
+            # Using private IP to communicate between nodes
+            Print.info('Using private IPs...')
+            consensus_addr = [f'{x.private}:{self.settings.consensus_port}' for x in hosts]
+            front_addr = [f'{x.private}:{self.settings.front_port}' for x in hosts]
+            mempool_addr = [f'{x.private}:{self.settings.mempool_port}' for x in hosts]
+            request_ports = [f'{self.settings.request_port}' for x in hosts]
+        else:
+            # Using public IP to communicate between nodes
+            Print.info('Using public IPs...')
+            consensus_addr = [f'{x.public}:{self.settings.consensus_port}' for x in hosts]
+            front_addr = [f'{x.public}:{self.settings.front_port}' for x in hosts]
+            mempool_addr = [f'{x.public}:{self.settings.mempool_port}' for x in hosts]
+            request_ports = [f'{self.settings.request_port}' for x in hosts]
+
         committee = Committee(names, consensus_addr, front_addr, mempool_addr, request_ports)
         committee.print(PathMaker.committee_file())
-        register = Register(client_names)  ##
-        register.print(PathMaker.register_file())   ##
+        register = Register(client_names)
+        register.print(PathMaker.register_file())
 
         node_parameters.print(PathMaker.parameters_file())
 
@@ -320,7 +353,7 @@ class Bench:
             c.put(PathMaker.parameters_file(), '.')
             c.put(PathMaker.register_file(), '.')
             c.close()
-    
+
     @staticmethod
     def send_config(tmp):
         (i, host, mode, key_path) = tmp
@@ -348,15 +381,19 @@ class Bench:
         # Filter all faulty nodes from the client addresses (or they will wait
         # for the faulty nodes to be online).
         committee = Committee.load(PathMaker.committee_file())
-        addresses = [f'{x.public}:{self.settings.front_port}' for x in hosts]
+        addresses_private = [f'{x.private}:{self.settings.front_port}' for x in hosts]
+        if len(self.settings.aws_regions) == 1:
+            addresses = addresses_private
+        else:
+            addresses = [f'{x.public}:{self.settings.front_port}' for x in hosts]
         rate_share = ceil(rate / committee.size())  # Take faults into account.
         if self.mode.is_vm():
             rate_share = rate
         timeout = node_parameters.timeout_delay
         client_logs = [PathMaker.client_log_file(i) for i in range(len(hosts))]
-        client_key_files = [PathMaker.key_file(i, 'client') for i in range(len(hosts))] ##
+        client_key_files = [PathMaker.key_file(i, 'client') for i in range(len(hosts))]
 
-        params = zip(hosts, client_key_files, addresses, client_logs)
+        params = zip(hosts, client_key_files, addresses_private, client_logs)
         indexed = zip(range(0, len(hosts)), params)
         args = [(i, self.mode, self.manager.settings.key_path, \
             rate_share, timeout, addresses, \
@@ -378,9 +415,9 @@ class Bench:
 
             in_parallel(Bench.boot_node, args, 'Booting nodes', 'Failed to boot nodes')
 
-            # Wait for the nodes to synchronize
-            Print.info('Waiting for the nodes to synchronize...')
-            sleep(2 * node_parameters.timeout_delay / 1000)
+        # Wait for the nodes to synchronize
+        Print.info('Waiting for the nodes to synchronize...')
+        sleep(2 * node_parameters.timeout_delay / 1000)
 
         # Wait for all transactions to be processed.
         duration = bench_parameters.duration
@@ -447,11 +484,24 @@ class Bench:
         progress = progress_bar(hosts, prefix='Downloading logs:')
         for i, host in enumerate(progress):
             c = Connection(host.public, user='ubuntu', connect_kwargs=self.connect)
-            c.get(
-                PathMaker.client_log_file(i), local=PathMaker.client_log_file(i)
-            )
-            if not self.mode.is_vm():
-                c.get(PathMaker.node_log_file(i), local=PathMaker.node_log_file(i))
+
+            zip_name = f'temp-logs-{i}.zip'
+            # Compress logs before downloading them (highly compressible)
+            cmd = CommandMaker.compress(PathMaker.log_files(i), zip_name, flat=True)
+            output = c.run(cmd, hide=True)
+
+            c.get(zip_name, local=zip_name)
+
+            cmd = CommandMaker.decompress(zip_name, into=PathMaker.logs_path())
+            subprocess.run([cmd], shell=True)
+
+            # cmd = f'{CommandMaker.remove(zip_name)} || true'
+            cmd = CommandMaker.remove(zip_name)
+            subprocess.run([cmd], shell=True)#, stderr=subprocess.DEVNULL)
+
+            zip_name = f'temp-logs-*.zip'
+            cmd = CommandMaker.remove(zip_name)
+            output = c.run(cmd, hide=True)
             c.close()
 
     def _get_logs_parallel(self, hosts):
@@ -461,7 +511,7 @@ class Bench:
             args += [(i, hosts[i], self.mode, self.manager.settings.key_path)]
 
         in_parallel(Bench.get_host_logs, args, 'Downloading logs', 'Failed to download logs')
-    
+
     @staticmethod
     def get_host_logs(tmp):
         (i, host, mode, key_path) = tmp
@@ -472,13 +522,25 @@ class Bench:
             connect_kwargs={
             "pkey": pkey,
         },)
-        c.get(
-            PathMaker.client_log_file(i), local=PathMaker.client_log_file(i)
-        )
-        if not mode.is_vm():
-            c.get(PathMaker.node_log_file(i), local=PathMaker.node_log_file(i))
+
+        zip_name = f'temp-logs-{i}.zip'
+        # Compress logs before downloading them (highly compressible)
+        cmd = CommandMaker.compress(PathMaker.log_files(i), zip_name, flat=True)
+        output = c.run(cmd, hide=True)
+
+        c.get(zip_name, local=zip_name)
+
+        cmd = CommandMaker.decompress(zip_name, into=PathMaker.logs_path())
+        subprocess.run([cmd], shell=True)
+
+        # cmd = f'{CommandMaker.remove(zip_name)} || true'
+        cmd = CommandMaker.remove(zip_name)
+        subprocess.run([cmd], shell=True, stderr=subprocess.DEVNULL)
+        
+        zip_name = f'temp-logs-*.zip'
+        cmd = CommandMaker.remove(zip_name)
+        output = c.run(cmd, hide=True)
         c.close()
-        return 0
 
     def _logs(self, hosts, faults, nb_accounts):
 
@@ -497,15 +559,9 @@ class Bench:
         except ConfigError as e:
             raise BenchError('Invalid nodes or bench parameters', e)
 
-        # Select which hosts to use.
-        selected_hosts = self._select_hosts(bench_parameters)
-        if not selected_hosts:
-            Print.warn('There are not enough instances available')
-            return
-
-        # Update nodes.
+        # Update all nodes.
         try:
-            self._update(selected_hosts)
+            self._update(self.manager.hosts(flat=True))
         except (GroupException, ExecutionError) as e:
             e = FabricError(e) if isinstance(e, GroupException) else e
             raise BenchError('Failed to update nodes', e)
@@ -514,20 +570,17 @@ class Bench:
         cmd = 'ulimit -n 1048575'
         subprocess.run([cmd], shell=True)
 
-        # setups = []
-        # for n in bench_parameters.nodes:
-        #     for r in bench_parameters.rate:
-        #         setups += [(n, r)]
-        # random.shuffle(setups)
-
-        # # Run benchmarks.
-        # for n, r in setups:
+        # Run benchmarks.
         for n in bench_parameters.nodes:
-            faults = bench_parameters.faults
-            hosts = selected_hosts[:n]
+            # Select which hosts to use.
+            selected_hosts = self._select_hosts(bench_parameters)
+            if not selected_hosts:
+                Print.warn('There are not enough instances available')
+                return
 
             # Do not boot faulty nodes.
-            hosts = hosts[:n-faults]
+            faults = bench_parameters.faults
+            hosts = selected_hosts[:n-faults]
 
             # Upload all configuration files.
             try:
@@ -555,4 +608,14 @@ class Bench:
                         if isinstance(e, GroupException):
                             e = FabricError(e)
                         Print.error(BenchError('Benchmark failed', e))
+                        uid = uuid.uuid4().hex
+                        filename = PathMaker.result_file(
+                            faults, n, r, bench_parameters.tx_size, self.mode, self.instance_type
+                        )
+                        tmp = filename.replace('results/', '')
+                        params = tmp.replace('.txt', '')
+                        cmd = CommandMaker.save_logs(params, uid, debug, error=True)
+                        subprocess.run([cmd], shell=True)
+                        # TODOTODO Save logs to special directory
                         continue
+# "regions": ["eu-west-3", "ap-northeast-1", "us-east-2"]

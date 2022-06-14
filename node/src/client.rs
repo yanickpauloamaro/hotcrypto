@@ -74,6 +74,8 @@ macro_rules! lap {
 
 const PRECISION: u64 = 20; // Sample precision.
 const BURST_DURATION: u64 = 1000 / PRECISION;
+const BATCH_SIZE: u64 = 1;
+const NB_ACCOUNTS: u64 = 100;
 
 #[tokio::main]
 async fn main() {
@@ -866,9 +868,13 @@ struct DiemClient {
 
     add_tx: DiemSignedTransaction,
     remove_tx: DiemSignedTransaction,
-    txs: Vec<DiemSignedTransaction>,
+
+    left_txs: Vec<DiemSignedTransaction>,
+    right_txs: Vec<DiemSignedTransaction>,
     
     tx_block: Vec<DiemSignedTransaction>,
+    samples: Vec<u64>,
+    burst: u64,
     tx_send: Sender<DiemMsg>,
 
     with_signature: bool,
@@ -878,11 +884,11 @@ impl DiemClient {
     pub async fn new(
         rate: u64,
         tx_send: Sender<DiemMsg>,
-        mut info_receive: Receiver<(DiemSignedTransaction, DiemSignedTransaction, AccountData)>,
+        mut info_receive: Receiver<(DiemSignedTransaction, DiemSignedTransaction, AccountData, Vec<DiemSignedTransaction>, Vec<DiemSignedTransaction>)>,
         with_signature: bool,
     ) -> Result<Self> {
 
-        let (add_tx, remove_tx, account) = info_receive.recv().await.unwrap();
+        let (add_tx, remove_tx, account, left_txs, right_txs) = info_receive.recv().await.unwrap();
 
         let burst = rate / PRECISION;
         info!("Burst: {}", burst);
@@ -891,8 +897,13 @@ impl DiemClient {
             account,
             add_tx: add_tx.clone(),
             remove_tx: remove_tx.clone(),
-            txs: vec![add_tx, remove_tx],
-            tx_block: Vec::with_capacity(burst as usize),
+            
+            left_txs,
+            right_txs,
+
+            tx_block: Vec::with_capacity(BATCH_SIZE as usize),
+            samples: Vec::new(),
+            burst,
             tx_send,
 
             with_signature,
@@ -908,34 +919,40 @@ impl ClientTrait for DiemClient {
             // Dummy signing to see performance difference
             let tx = transfer_tx(&self.account, &self.account, &self.account);
         }
+        // Burst ------------------------
+        let tx_index = (nonce as usize) % self.left_txs.len();
+        let mut tx = self.left_txs.get_mut(tx_index).unwrap();
+        self.tx_block.push(tx.clone());
+        tx.raw_txn.sequence_number += 1;
 
-        let (mut tx, nonce) = if nonce % 2 == 0 {   // TODO Check == 1 or == 0
-            (self.add_tx.clone(), nonce/2) // Alice tx
-        } else {
-            (self.remove_tx.clone(), nonce/2) // Bob tx
-        };
-
-        tx.raw_txn.sequence_number += nonce;
+        if is_sample {
+            self.samples.push(counter);
+        }
 
         // Send each burst as a block of transactions (should be beneficial for DiemVM performance)
-        self.tx_block.push(tx);
-
-        if self.tx_block.len() == self.tx_block.capacity() {
+        // if self.tx_block.len() == (BATCH_SIZE as usize) || (nonce  + 1) % self.burst == 0 {
+        if (nonce + 1) % self.burst == 0 {
             let to_send = self.tx_block.clone();
             self.tx_block.clear();
 
-            // Each burst contains a single sample transaction
-            info!("Sending sample input {} from {}", counter, self.account.address());
-            Wrapper::DiemLocal(&self.tx_send, (to_send, true))
+            debug_assert!(self.samples.len() <= 1);
+
+            let has_samples = self.samples.len() > 0;
+            for sample in &self.samples {
+                // info!("Sending sample input {} from {}", sample, self.account.address()); // TODOTODO
+            }
+            self.samples.clear();
+
+            Wrapper::DiemLocal(&self.tx_send, (to_send, has_samples))
         } else {
             Wrapper::Blank
         }
         
         // One by one ---------------------------
-        // let to_send = vec![tx];
+        // let tx_index = (nonce as usize) % self.left_txs.len();
+        // let mut tx = self.left_txs.get_mut(tx_index).unwrap();
+        // let to_send = vec![tx.clone()];
         // if is_sample {
-        //     // info!("Signing transaction took {} ms", start.elapsed().as_millis());
-        //     // info!("Sending sample input {} from {:?}", counter, self.alice);
         //     info!("Sending sample input {} from someone", counter);
         // }
         // Wrapper::DiemLocal(&self.tx_send, (to_send, is_sample))
@@ -961,7 +978,7 @@ impl DiemNode {
 
     pub async fn new(
         tx_receive: Receiver<DiemMsg>,
-        info_send: Sender<(DiemSignedTransaction, DiemSignedTransaction, AccountData)>)
+        info_send: Sender<(DiemSignedTransaction, DiemSignedTransaction, AccountData, Vec<DiemSignedTransaction>, Vec<DiemSignedTransaction>)>)
     -> Self {
         let mut executor = FakeExecutor::from_genesis_file();
         let owner = executor.create_raw_account_data(CONST_INITIAL_BALANCE, 10);
@@ -1002,7 +1019,40 @@ impl DiemNode {
         nonce += 1;
         execute_and_apply(txn, &mut executor, false);
 
-        info!("Compiling and executing publish script (alice)...");
+        let mut left = Vec::with_capacity(NB_ACCOUNTS as usize);
+        let mut right = Vec::with_capacity(NB_ACCOUNTS as usize);
+        let mut to_execute = Vec::with_capacity(2 * NB_ACCOUNTS as usize);
+
+        let s = Instant::now();
+        info!("Creating {} accounts...", 2 * NB_ACCOUNTS);
+        for i in 0..(2*NB_ACCOUNTS) {
+            let start = Instant::now();
+            let account = executor.create_raw_account_data(CONST_INITIAL_BALANCE, 0);
+            executor.add_account_data(&account);
+            let tx = publish_tx(&owner, &account, nonce);
+            nonce += 1;
+            to_execute.push(tx);
+            
+            if i % 2 == 0 {
+                left.push(account);
+            } else {
+                right.push(account);
+            }
+        }
+        info!("Creating all accounts took {} ms", s.elapsed().as_millis());
+
+        let start = Instant::now();
+        info!("Publishing {} accounts...", to_execute.len());
+        execute_and_apply_many(to_execute, &mut executor, false);
+        info!("Publishing took {} ms", start.elapsed().as_millis());
+
+        let mut left_txs = Vec::with_capacity(NB_ACCOUNTS as usize);
+        let mut right_txs = Vec::with_capacity(NB_ACCOUNTS as usize);
+        for (l, r) in left.into_iter().zip(right) {
+            left_txs.push(transfer_tx(&owner, &l, &r));
+            right_txs.push(transfer_tx(&owner, &r, &l));
+        }
+
         let tx = publish_tx(&owner, &alice, nonce);
         nonce += 1;
         execute_and_apply(tx, &mut executor, false);
@@ -1015,7 +1065,7 @@ impl DiemNode {
 
         let bob_tx = transfer_tx(&owner, &bob, &alice);
 
-        info_send.send((alice_tx, bob_tx, owner)).await;
+        info_send.send((alice_tx, bob_tx, owner, left_txs, right_txs)).await;
 
         Self {
             tx_receive,
@@ -1040,14 +1090,14 @@ impl DiemNode {
                 }
                 Some((tx_block, is_sample)) = self.tx_receive.recv() => {
                     if is_sample {
-                        info!("Processing block containing sample {}", counter);
+                        // info!("Processing block containing sample {}", counter); // TODOTODO
                     }
                     nonce += tx_block.len();
-                    execute_and_apply_many(tx_block, &mut self.executor, false);
                     // execute_and_apply_many(tx_block, &mut self.executor, true);
+                    execute_and_apply_many(tx_block, &mut self.executor, false);
                     if is_sample {
                         // NOTE: This log entry is used to compute performance.
-                        info!("Processed sample input {}", counter);
+                        // info!("Processed sample input {}", counter); // TODOTODO
                         counter += 1;
                     }
                 }
@@ -1104,7 +1154,7 @@ fn publish_tx(owner: &AccountData, account: &AccountData, nonce: u64) -> DiemSig
     let args = vec![
         DiemArgument::Address(*account.address()),
         // DiemArgument::U64(CONST_INITIAL_BALANCE),
-        DiemArgument::U64(1_000_000),
+        DiemArgument::U64(5_000_000),
         ];
     let script = compile_currency_script(&owner, publish_script_file(), args);
 

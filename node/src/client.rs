@@ -125,7 +125,6 @@ async fn main() {
                 ).subcommand(
                     SubCommand::with_name("diemvm")
                         .about("Benchmark DiemVM")
-                        .arg_from_usage("--with_signature=<BOOL> 'Whether to compute a signature for each transaction'")
                         /* timeout, rate */
                 )
         )
@@ -178,12 +177,7 @@ async fn run<'a>(matches: &ArgMatches<'_>) -> Result<()> {
         ("hotmove", Some(subm)) =>      ClientWrapper::HotMove(CryptoClient::<HotMove>::from(subm, timeout, HotMove::new()?).await?),
         ("movevm", Some(subm)) =>       ClientWrapper::MoveVM(MoveClient::from(subm, timeout, rate, duration).await?),
         ("diemvm", Some(subm)) => {
-            let with_signature = subm
-                .value_of("with_signature")
-                .unwrap()
-                .parse::<bool>()
-                .context("must be a boolean")?;
-            return ClientWrapper::benchmark_diem(rate, duration, with_signature).await;
+            return ClientWrapper::benchmark_diem(rate, duration).await;
         }
         _ => unreachable!()
     };
@@ -276,7 +270,7 @@ enum ClientWrapper {
 }
 
 impl ClientWrapper {
-    async fn benchmark_diem(rate: u64, duration: u64, with_signature: bool) -> Result<()> {
+    async fn benchmark_diem(rate: u64, duration: u64) -> Result<()> {
         // 10 seconds of margin
         let channel_capacity = 10 * rate as usize;
         info!("Channel capacity: {}", channel_capacity);
@@ -285,8 +279,7 @@ impl ClientWrapper {
 
         tokio::spawn(async move {
             let cores = num_cpus::get();
-            let client = DiemClient::new(rate, tx_send, info_receive, with_signature).await?;
-
+            let client = DiemClient::new(rate, tx_send, info_receive).await?;
 
             let wrapper = ClientWrapper::DiemVM(client);
             info!("Benchmarking {}", wrapper.to_string());
@@ -581,9 +574,6 @@ impl<T> ClientTrait for CryptoClient<T>
         } else {
             self.signed_transaction(dest, NORMAL_TX_AMOUNT, nonce)
         };
-        
-        // let bytes = Bytes::from(signed);
-        // Wrapper::Remote(&mut self.transport, bytes)
 
         let serialized: Vec<u8> = bincode::serialize(&signed)
             .expect("Failed to serialize a transaction");
@@ -635,9 +625,6 @@ impl MoveClient {
         
         let node = MoveNode::new(tx_receive, &register);
         let node_handle = tokio::spawn(node.receive(duration));
-
-        // info!("Waiting for the node to be ready...");
-        // sleep(Duration::from_millis(2 * timeout)).await;
         
         // Make sure we don't make transfers to ourself
         register.accounts.retain(|account| account.public_key != secret.name);
@@ -866,9 +853,6 @@ impl MoveNode {
 struct DiemClient {
     account: AccountData,
 
-    add_tx: DiemSignedTransaction,
-    remove_tx: DiemSignedTransaction,
-
     left_txs: Vec<DiemSignedTransaction>,
     right_txs: Vec<DiemSignedTransaction>,
     
@@ -876,27 +860,22 @@ struct DiemClient {
     samples: Vec<u64>,
     burst: u64,
     tx_send: Sender<DiemMsg>,
-
-    with_signature: bool,
 }
 
 impl DiemClient {
     pub async fn new(
         rate: u64,
         tx_send: Sender<DiemMsg>,
-        mut info_receive: Receiver<(DiemSignedTransaction, DiemSignedTransaction, AccountData, Vec<DiemSignedTransaction>, Vec<DiemSignedTransaction>)>,
-        with_signature: bool,
+        mut info_receive: Receiver<(AccountData, Vec<DiemSignedTransaction>, Vec<DiemSignedTransaction>)>,
     ) -> Result<Self> {
 
-        let (add_tx, remove_tx, account, left_txs, right_txs) = info_receive.recv().await.unwrap();
+        let (account, left_txs, right_txs) = info_receive.recv().await.unwrap();
 
         let burst = rate / PRECISION;
         info!("Burst: {}", burst);
         
         let client = Self{
             account,
-            add_tx: add_tx.clone(),
-            remove_tx: remove_tx.clone(),
             
             left_txs,
             right_txs,
@@ -905,8 +884,6 @@ impl DiemClient {
             samples: Vec::new(),
             burst,
             tx_send,
-
-            with_signature,
         };
         
         Ok(client)
@@ -915,13 +892,15 @@ impl DiemClient {
 
 impl ClientTrait for DiemClient {
     fn send(&mut self, is_sample: bool, nonce: u64, counter: u64) -> Wrapper {
-        if self.with_signature {
-            // Dummy signing to see performance difference
-            let tx = transfer_tx(&self.account, &self.account, &self.account);
-        }
+
         // Burst ------------------------
-        let tx_index = (nonce as usize) % self.left_txs.len();
-        let mut tx = self.left_txs.get_mut(tx_index).unwrap();
+        let mut tx = if (nonce as usize) < self.left_txs.len() {
+            let tx_index = (nonce as usize) % self.left_txs.len();
+            self.left_txs.get_mut(tx_index).unwrap()
+        } else {
+            let tx_index = (nonce as usize) % self.right_txs.len();
+            self.right_txs.get_mut(tx_index).unwrap()
+        };
         self.tx_block.push(tx.clone());
         tx.raw_txn.sequence_number += 1;
 
@@ -930,7 +909,6 @@ impl ClientTrait for DiemClient {
         }
 
         // Send each burst as a block of transactions (should be beneficial for DiemVM performance)
-        // if self.tx_block.len() == (BATCH_SIZE as usize) || (nonce  + 1) % self.burst == 0 {
         if (nonce + 1) % self.burst == 0 {
             let to_send = self.tx_block.clone();
             self.tx_block.clear();
@@ -939,7 +917,7 @@ impl ClientTrait for DiemClient {
 
             let has_samples = self.samples.len() > 0;
             for sample in &self.samples {
-                // info!("Sending sample input {} from {}", sample, self.account.address()); // TODOTODO
+                info!("Sending sample input {} from {}", sample, self.account.address());
             }
             self.samples.clear();
 
@@ -947,15 +925,6 @@ impl ClientTrait for DiemClient {
         } else {
             Wrapper::Blank
         }
-        
-        // One by one ---------------------------
-        // let tx_index = (nonce as usize) % self.left_txs.len();
-        // let mut tx = self.left_txs.get_mut(tx_index).unwrap();
-        // let to_send = vec![tx.clone()];
-        // if is_sample {
-        //     info!("Sending sample input {} from someone", counter);
-        // }
-        // Wrapper::DiemLocal(&self.tx_send, (to_send, is_sample))
     }
 
     fn transaction_size(&self) -> usize {
@@ -963,7 +932,6 @@ impl ClientTrait for DiemClient {
     }
 
     fn to_string(&self) -> String {
-        // TODO Add DiemVM to utils.py::Mode and logs
         "DiemVM".to_string()
     }
 }
@@ -978,7 +946,7 @@ impl DiemNode {
 
     pub async fn new(
         tx_receive: Receiver<DiemMsg>,
-        info_send: Sender<(DiemSignedTransaction, DiemSignedTransaction, AccountData, Vec<DiemSignedTransaction>, Vec<DiemSignedTransaction>)>)
+        info_send: Sender<(AccountData, Vec<DiemSignedTransaction>, Vec<DiemSignedTransaction>)>)
     -> Self {
         let mut executor = FakeExecutor::from_genesis_file();
         let owner = executor.create_raw_account_data(CONST_INITIAL_BALANCE, 10);
@@ -990,28 +958,6 @@ impl DiemNode {
         executor.add_account_data(&bob);
 
         let mut nonce = 10;
-        // Add resource/remove resource ----------------------------------------
-        // publish module with add and remove resource
-        // let (module, txn) = resource_module_tx(&owner, nonce);
-        // nonce += 1;
-        // execute_and_apply(txn, &mut executor, false);
-
-        // // TODO use actual diem transfer script
-        // let add = add_resource_script(&owner, vec![module.clone()]);
-        // let remove = remove_resource_script(&owner, vec![module.clone()]);
-
-        // let add_tx = owner
-        //     .account()
-        //     .transaction()
-        //     .script(add)
-        //     .sequence_number(nonce)
-        //     .sign();
-        // let remove_tx = owner
-        //     .account()
-        //     .transaction()
-        //     .script(remove)
-        //     .sequence_number(nonce)
-        //     .sign();
 
         // Transfer BasicCoins -------------------------------------------------
         info!("Compiling and executing currency module...");
@@ -1026,7 +972,6 @@ impl DiemNode {
         let s = Instant::now();
         info!("Creating {} accounts...", 2 * NB_ACCOUNTS);
         for i in 0..(2*NB_ACCOUNTS) {
-            let start = Instant::now();
             let account = executor.create_raw_account_data(CONST_INITIAL_BALANCE, 0);
             executor.add_account_data(&account);
             let tx = publish_tx(&owner, &account, nonce);
@@ -1043,7 +988,7 @@ impl DiemNode {
 
         let start = Instant::now();
         info!("Publishing {} accounts...", to_execute.len());
-        execute_and_apply_many(to_execute, &mut executor, false);
+        execute_and_apply_many(to_execute, &mut executor, true);
         info!("Publishing took {} ms", start.elapsed().as_millis());
 
         let mut left_txs = Vec::with_capacity(NB_ACCOUNTS as usize);
@@ -1053,19 +998,7 @@ impl DiemNode {
             right_txs.push(transfer_tx(&owner, &r, &l));
         }
 
-        let tx = publish_tx(&owner, &alice, nonce);
-        nonce += 1;
-        execute_and_apply(tx, &mut executor, false);
-
-        let tx = publish_tx(&owner, &bob, nonce);
-        nonce += 1;
-        execute_and_apply(tx, &mut executor, false);
-
-        let alice_tx = transfer_tx(&owner, &alice, &bob);
-
-        let bob_tx = transfer_tx(&owner, &bob, &alice);
-
-        info_send.send((alice_tx, bob_tx, owner, left_txs, right_txs)).await;
+        info_send.send((owner, left_txs, right_txs)).await;
 
         Self {
             tx_receive,
@@ -1090,14 +1023,13 @@ impl DiemNode {
                 }
                 Some((tx_block, is_sample)) = self.tx_receive.recv() => {
                     if is_sample {
-                        // info!("Processing block containing sample {}", counter); // TODOTODO
+                        info!("Processing block containing sample {}", counter);
                     }
                     nonce += tx_block.len();
-                    // execute_and_apply_many(tx_block, &mut self.executor, true);
                     execute_and_apply_many(tx_block, &mut self.executor, false);
                     if is_sample {
                         // NOTE: This log entry is used to compute performance.
-                        // info!("Processed sample input {}", counter); // TODOTODO
+                        info!("Processed sample input {}", counter);
                         counter += 1;
                     }
                 }
@@ -1129,7 +1061,7 @@ fn execute_and_apply_many(tx_block: Vec<DiemSignedTransaction>, executor: &mut F
     let output = executor.execute(tx_block, parallel);
 
     for (out, _tx) in output.into_iter().zip(copy) {
-        // warn!("Status output: {:?}\n\tfrom tx {:?}", out, tx);
+
         assert_eq!(
             out.status(),
             &TransactionStatus::Keep(KeptVMStatus::Executed)
@@ -1153,7 +1085,6 @@ fn transaction_script_file() -> String {
 fn publish_tx(owner: &AccountData, account: &AccountData, nonce: u64) -> DiemSignedTransaction {
     let args = vec![
         DiemArgument::Address(*account.address()),
-        // DiemArgument::U64(CONST_INITIAL_BALANCE),
         DiemArgument::U64(5_000_000),
         ];
     let script = compile_currency_script(&owner, publish_script_file(), args);
@@ -1210,7 +1141,7 @@ fn compile_currency_script(owner: &AccountData, script_file: String, args: Vec<D
 }
 
 fn compile_currency_module(owner: &AccountData) -> CompModule {
-    // c.f. admin_script_builder
+
     let (_files, mut compiled_program) =
     move_compiler_01::Compiler::new(&[currency_module_file()], &diem_framework::diem_stdlib_files())
             .set_flags(move_compiler_01::Flags::empty().set_sources_shadow_deps(false))
@@ -1247,7 +1178,7 @@ fn currency_module_tx(owner: &AccountData, seq_num: u64) -> (CompModule, DiemSig
         .serialize(&mut module_blob)
         .expect("Module must serialize");
     verify_module(&module).expect("Module must verify");
-    // info!("Module compiled successfully");
+
     (
         module,
         owner
@@ -1257,111 +1188,4 @@ fn currency_module_tx(owner: &AccountData, seq_num: u64) -> (CompModule, DiemSig
             .sequence_number(seq_num)
             .sign(),
     )
-}
-
-// ----------------------------------------------------
-fn resource_module_tx(sender: &AccountData, seq_num: u64) -> (CompModule, DiemSignedTransaction) {
-    let module_code = format!(
-        "
-        module 0x{}.M {{
-            import 0x1.Signer;
-            struct T1 has key {{ v: u64 }}
-
-            public borrow_t1(account: &signer) acquires T1 {{
-                let t1: &Self.T1;
-            label b0:
-                t1 = borrow_global<T1>(Signer.address_of(move(account)));
-                return;
-            }}
-
-            public change_t1(account: &signer, v: u64) acquires T1 {{
-                let t1: &mut Self.T1;
-            label b0:
-                t1 = borrow_global_mut<T1>(Signer.address_of(move(account)));
-                *&mut move(t1).T1::v = move(v);
-                return;
-            }}
-
-            public remove_t1(account: &signer) acquires T1 {{
-                let v: u64;
-            label b0:
-                T1 {{ v }} = move_from<T1>(Signer.address_of(move(account)));
-                return;
-            }}
-
-            public publish_t1(account: &signer) {{
-            label b0:
-                move_to<T1>(move(account), T1 {{ v: 3 }});
-                return;
-            }}
-        }}
-        ",
-        sender.address(),
-    );
-
-    let compiler = MoveIRCompiler {
-        deps: diem_framework_releases::current_modules().iter().collect(),
-    };
-    let module = compiler
-        .into_compiled_module(module_code.as_str())
-        .expect("Module compilation failed");
-
-    let mut module_blob = vec![];
-    module
-        .serialize(&mut module_blob)
-        .expect("Module must serialize");
-    verify_module(&module).expect("Module must verify");
-    (
-        module,
-        sender
-            .account()
-            .transaction()
-            .module(Module::new(module_blob))
-            .sequence_number(seq_num)
-            .sign(),
-    )
-}
-
-fn add_resource_script(sender: &AccountData, extra_deps: Vec<CompModule>) -> Script {
-    let program = format!(
-        "
-            import 0x{}.M;
-
-            main(account: signer) {{
-            label b0:
-                M.publish_t1(&account);
-                return;
-            }}
-        ",
-        sender.address(),
-    );
-
-    let s = Instant::now();
-    info!("Compiling {} program", current_function_name!());
-    let script = compile_script(&program, extra_deps);
-    info!("Compilation of {} took {} ms", current_function_name!(), s.elapsed().as_millis());
-
-    script
-}
-
-fn remove_resource_script(sender: &AccountData, extra_deps: Vec<CompModule>) -> Script {
-    let program = format!(
-        "
-            import 0x{}.M;
-
-            main(account: signer) {{
-            label b0:
-                M.remove_t1(&account);
-                return;
-            }}
-        ",
-        sender.address(),
-    );
-
-    let s = Instant::now();
-    info!("Compiling {} program", current_function_name!());
-    let script = compile_script(&program, extra_deps);
-    info!("Compilation of {} took {} ms", current_function_name!(), s.elapsed().as_millis());
-
-    script
 }

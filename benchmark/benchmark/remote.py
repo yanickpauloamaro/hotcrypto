@@ -4,7 +4,7 @@ from fabric import Connection, ThreadingGroup as Group
 from fabric.exceptions import GroupException
 from paramiko import RSAKey
 from paramiko.ssh_exception import PasswordRequiredException, SSHException
-from os.path import basename, splitext
+from os.path import basename, splitext, join
 from time import sleep
 from math import ceil
 import subprocess
@@ -69,22 +69,20 @@ class Bench:
             'sudo apt-get -y upgrade',
             'sudo apt-get -y autoremove',
 
-            # # The following dependencies prevent the error: [error: linker `cc` not found].
-            # 'sudo apt-get -y install build-essential',
-            # 'sudo apt-get -y install cmake',
+            # The following dependencies prevent the error: [error: linker `cc` not found].
+            'sudo apt-get -y install build-essential',
+            'sudo apt-get -y install cmake',
 
-            # # Install rust (non-interactive).
-            # 'curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y',
-            # 'source $HOME/.cargo/env',
-            # 'rustup default stable',
+            # Install rust (non-interactive).
+            'curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y',
+            'source $HOME/.cargo/env',
+            'rustup default stable',
 
-            # # This is missing from the Rocksdb installer (needed for Rocksdb).
-            # 'sudo apt-get install -y clang',
+            # This is missing from the Rocksdb installer (needed for Rocksdb).
+            'sudo apt-get install -y clang',
 
             f'sudo apt-get install -y unzip',
             f'sudo apt-get install -y zip',
-
-            f'(git clone https://github.com/asonnino/hotstuff.git || (cd hotstuff ; git pull))' ## TODOTODO remove after benchmarking
         ]
 
         cmd_diem = [
@@ -98,15 +96,12 @@ class Bench:
         try:
             public_ips = [x.public for x in hosts]
             g = Group(*public_ips, user='ubuntu', connect_kwargs=self.connect)
-            
-            Print.info('Apt update, cloning hotstuff and installing zip...') # TODOTODO remove 
+
+            Print.info('Installing rust...')
             g.run(' && '.join(cmd), hide=True)
 
-            # Print.info('Installing rust...')
-            # g.run(' && '.join(cmd), hide=True)
-
-            # Print.info('Cloning Diem repo and installing Diem dependencies...')
-            # g.run(' && '.join(cmd_diem), hide=True) # TODOTODO
+            Print.info('Cloning Diem repo and installing Diem dependencies...')
+            g.run(' && '.join(cmd_diem), hide=True)
 
             # TODOTODO make hotcrypto repo public and clone it instead of zip/sending it
             # Print.info('Uploading repo...')
@@ -415,9 +410,16 @@ class Bench:
 
             in_parallel(Bench.boot_node, args, 'Booting nodes', 'Failed to boot nodes')
 
-        # Wait for the nodes to synchronize
-        Print.info('Waiting for the nodes to synchronize...')
-        sleep(2 * node_parameters.timeout_delay / 1000)
+        delay = 0
+        if self.mode == Mode.diemvm:
+            Print.info('Waiting DiemVM to create accounts...')
+            delay = Mode.diemvm_delay()
+        else:
+            # Wait for the nodes to synchronize
+            Print.info('Waiting for the nodes to synchronize...')
+            delay = self.node_parameters.timeout_delay
+
+        sleep(2 * delay / 1000)
 
         # Wait for all transactions to be processed.
         duration = bench_parameters.duration
@@ -495,9 +497,8 @@ class Bench:
             cmd = CommandMaker.decompress(zip_name, into=PathMaker.logs_path())
             subprocess.run([cmd], shell=True)
 
-            # cmd = f'{CommandMaker.remove(zip_name)} || true'
             cmd = CommandMaker.remove(zip_name)
-            subprocess.run([cmd], shell=True)#, stderr=subprocess.DEVNULL)
+            subprocess.run([cmd], shell=True, stderr=subprocess.DEVNULL)
 
             zip_name = f'temp-logs-*.zip'
             cmd = CommandMaker.remove(zip_name)
@@ -533,7 +534,6 @@ class Bench:
         cmd = CommandMaker.decompress(zip_name, into=PathMaker.logs_path())
         subprocess.run([cmd], shell=True)
 
-        # cmd = f'{CommandMaker.remove(zip_name)} || true'
         cmd = CommandMaker.remove(zip_name)
         subprocess.run([cmd], shell=True, stderr=subprocess.DEVNULL)
         
@@ -570,6 +570,8 @@ class Bench:
         cmd = 'ulimit -n 1048575'
         subprocess.run([cmd], shell=True)
 
+        tx_size = self.mode.tx_size(bench_parameters.tx_size)
+
         # Run benchmarks.
         for n in bench_parameters.nodes:
             # Select which hosts to use.
@@ -596,26 +598,25 @@ class Bench:
                 # Run the benchmark.
                 for i in range(bench_parameters.runs):
                     Print.heading(f'Run {i+1}/{bench_parameters.runs}')
+                    params = PathMaker.params(
+                        faults, n, r, bench_parameters.tx_size, self.mode, self.instance_type
+                    )
                     try:
                         self._run_single(
                             hosts, r, bench_parameters, node_parameters, debug
                         )
-                        self._logs(hosts, faults, n).print(PathMaker.result_file(
-                            faults, n, r, bench_parameters.tx_size, self.mode, self.instance_type
-                        ), debug or warmup)
+                        self._logs(hosts, faults, n).print(params, debug or warmup)
                     except (subprocess.SubprocessError, GroupException, ParseError) as e:
                         self.kill(hosts=hosts)
                         if isinstance(e, GroupException):
                             e = FabricError(e)
+
                         Print.error(BenchError('Benchmark failed', e))
                         uid = uuid.uuid4().hex
-                        filename = PathMaker.result_file(
-                            faults, n, r, bench_parameters.tx_size, self.mode, self.instance_type
-                        )
-                        tmp = filename.replace('results/', '')
-                        params = tmp.replace('.txt', '')
-                        cmd = CommandMaker.save_logs(params, uid, debug, error=True)
+                        dir = join(PathMaker.results_path(), PathMaker.error_path)
+
+                        zip_file = PathMaker.save_file(dir, params, uid)
+                        Print.info(f'Saving logs to {zip_file}...')
+                        cmd = CommandMaker.save_logs(zip_file)
                         subprocess.run([cmd], shell=True)
-                        # TODOTODO Save logs to special directory
                         continue
-# "regions": ["eu-west-3", "ap-northeast-1", "us-east-2"]

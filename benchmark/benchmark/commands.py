@@ -1,4 +1,4 @@
-from os.path import join
+from os.path import join, dirname
 
 from benchmark.utils import PathMaker, Mode
 
@@ -16,18 +16,14 @@ class CommandMaker:
         return f'rm -r {PathMaker.logs_path()} ; mkdir -p {PathMaker.logs_path()}'
     
     @staticmethod
-    def save_logs(params, uid, debug=False, error=False):
+    def save_logs(zip_file):
         sources = [f'{PathMaker.logs_path()}/*.log']
-        zip_name = f'{PathMaker.save_path(params, uid, debug, error)}/{uid}'
+        dir = dirname(zip_file)
         cmd = [
-            f'mkdir -p {PathMaker.save_path(params, uid, debug, error)}',
-            CommandMaker.compress(sources, zip_name),
+            f'mkdir -p {dir}',
+            CommandMaker.compress(sources, zip_file),
         ]
         return '; '.join(cmd)
-        return (
-            f'mkdir -p {PathMaker.save_path(params, uid, debug)} ; '
-            f'cp -r logs/*.log {PathMaker.save_path(params, uid, debug)}/'
-        )
 
     @staticmethod
     def compile(jobs = None):
@@ -51,8 +47,6 @@ class CommandMaker:
         return (f'./node {v} run --keys {keys} --committee {committee} '
                 f'--store {store} --parameters {parameters} --port {port} --accounts {register_file} '
                 f'{mode}')
-        # return (f'./node {v} run --keys {keys} --committee {committee} '
-                # f'--store {store} --parameters {parameters}') ## HotStuff
 
     @staticmethod
     def run_client(address, size, rate, timeout, duration, keys, register_file, mode, nodes=[]):
@@ -79,14 +73,8 @@ class CommandMaker:
 
         if mode in [Mode.hotcrypto, Mode.hotmove, Mode.movevm]:
             cmd += [f'--keys {keys} --accounts {register_file}']
-
-        if mode == Mode.diemvm:
-            cmd += ['--with_signature false']
         
-        print(' '.join(cmd))
         return ' '.join(cmd)
-        # return (f'./client {address} --size {size} '
-                # f'--rate {rate} --timeout {timeout} {nodes}') ## HotStuff
 
     @staticmethod
     def kill():

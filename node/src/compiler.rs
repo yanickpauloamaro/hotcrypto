@@ -38,10 +38,6 @@ impl Compiler {
         self.compiler().into_script_blob(code)
     }
 
-    // pub fn into_compiled_module(self, code: &str) -> Result<CompiledModule> {
-    //     self.compiler().into_compiled_module(code)
-    // }
-
     pub fn dependencies(&self) -> Vec<&CompiledModule> {
         self.compiler().deps
     }

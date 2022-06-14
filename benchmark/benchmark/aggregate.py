@@ -83,9 +83,7 @@ class Result:
             tps = int(search(r'.* DiemVM TPS: (\d+)', raw).group(1))
             latency = int(search(r'.* DiemVM latency: (\d+)', raw).group(1))
         else:
-            tps = int(search(r'.* Diem TPS: (\d+)', raw).group(1))
-            latency = int(search(r'.* Diem latency: (\d+)', raw).group(1))
-            # raise AggegatorError(f'Unknown mode {mode}')
+            raise AggegatorError(f'Unknown mode {mode}')
         return cls(tps, latency)
 
     @classmethod
@@ -104,7 +102,7 @@ class LogAggregator:
     def __init__(self, max_latencies, mode):
         assert isinstance(max_latencies, list)
         assert all(isinstance(x, int) for x in max_latencies)
-        # assert mode in Mode.possible_values()
+        assert mode in Mode.possible_values()
 
         self.max_latencies = max_latencies
         self.mode = mode

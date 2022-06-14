@@ -172,16 +172,13 @@ class LogParser:
             if not mode_str in Mode.possible_values():
                 raise ParseError('Unknown mode')
 
-            mode = Mode(mode_str) ##
-            # mode = Mode('hotstuff') ## Hotstuff
+            mode = Mode(mode_str)
 
             cores = int(search(r'Number of cores: (\d+)', log).group(1))
-            # cores = 4 ## Hotstuff
             size = int(search(r'Transactions size: (\d+)', log).group(1))
             rate = int(search(r'Transactions rate: (\d+)', log).group(1))
 
-            tmp = search(r'\[(.*Z) .* Start sending', log).group(1) ##
-            # tmp = search(r'\[(.*Z) .* Start ', log).group(1) ## Hotstuff
+            tmp = search(r'\[(.*Z) .* Start sending', log).group(1)
             start = self._to_posix(tmp)
 
             tmp = search(r'\[(.*Z) .* Stop sending ', log)
@@ -369,9 +366,9 @@ class LogParser:
                 latency += c - self.proposals[d]
         return latency / len(commits) if commits else 0
 
-        # Sometimes yields negative latency
-        latency = [c - self.proposals[d] for d, c in self.commits['consensus'].items()]
-        return mean(latency) if latency else 0
+        ## NB: Sometimes yields negative latency
+        # latency = [c - self.proposals[d] for d, c in self.commits['consensus'].items()]
+        # return mean(latency) if latency else 0
 
     # Consensus e2e ------------------------------------------------------------------
     def _end_to_end_throughput(self):
@@ -416,9 +413,9 @@ class LogParser:
         if not self.commits[mode]:
             return 0, 0, 0
 
+        ## NB: This duration gives weird results during high contention, use self.duration instead
         # start, end = self.start, max(self.commits[mode].values())
         # duration = end - start
-        # TODOTODO the other version gives weird results during high contention
         duration = self.duration
 
         nb_tx = sum(self.sizes[mode].values())
@@ -442,6 +439,7 @@ class LogParser:
 
     # Move ------------------------------------------------------------------
     def _move_throughput(self):
+        ## NB: This duration gives weird results during high contention, use self.duration instead
         # start, end = self.start, max(self.commits['move'].values())
         # duration = end - start
         duration = self.duration
@@ -582,32 +580,26 @@ class LogParser:
             '-----------------------------------------\n'
         )
 
-    def print(self, filename, debug=False):
-        assert isinstance(filename, str)
+    def print(self, params, debug=False):
+        # filename = bench-x-y-z
+        assert isinstance(params, str)
+        
+        dir = PathMaker.results_path()
+        if debug:
+            dir = join(dir, PathMaker.debug_path)
 
-        # Save logs and results
         uid = uuid.uuid4().hex
-        tmp = filename.replace('results/', '')
-        params = tmp.replace('.txt', '')
-        path = PathMaker.save_path(params, uid, debug)
+        zip_file = PathMaker.save_file(dir, params, uid)
 
-        Print.info(f'Saving to {path}/...')
-        # dir/params/uid/uid.zip
-        cmd = CommandMaker.save_logs(params, uid, debug)
+        # dir/logs/bench-x-y-z/uid.zip
+        Print.info(f'Saving logs to {zip_file}...')
+        cmd = CommandMaker.save_logs(zip_file)
         subprocess.run([cmd], shell=True)
 
-        result = self.result(uid)
-        # dir/params/uid/result.txt
-        with open(f'{path}/result.txt', 'a') as f:
-            f.write(result)
-        
-        # dir/params.txt (append)
-        with open(f'{PathMaker.nas_path()}/{tmp}', 'a') as f:
-            f.write(result)
-
-        if debug:
-            filename = f'{PathMaker.debug_path()}/{tmp}'
+        # dir/bench-x-y-z.txt
+        filename = PathMaker.result_file(dir, params)
         Print.info(f'Result file: {filename}')
+        result = self.result(uid)
         with open(filename, 'a') as f:
             f.write(result)
 

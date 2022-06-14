@@ -1,6 +1,7 @@
-from os.path import join
+from os.path import join, basename
 from multiprocessing import Pool
 from enum import Enum, auto
+from platform import node
 import tqdm
 
 class BenchError(Exception):
@@ -25,7 +26,7 @@ class PathMaker:
         return '.committee.json'
 
     @staticmethod
-    def register_file():    ##
+    def register_file():
         return '.register.json'
 
     @staticmethod
@@ -33,7 +34,7 @@ class PathMaker:
         return '.parameters.json'
 
     @staticmethod
-    def key_file(i, bin='node'):    ##
+    def key_file(i, bin='node'):
         assert isinstance(i, int) and i >= 0
         return f'.{bin}-{i}.json'
 
@@ -49,31 +50,11 @@ class PathMaker:
     @staticmethod
     def debug_path():
         return 'debug'
-        # return '/run/user/1000/gvfs/smb-share:server=minicloud.local,share=dcl/debug' ## TODOTODO
-
-    @staticmethod
-    def nas_path(): #TODOTODO Remove this
-        # return '/run/user/1000/gvfs/smb-share:server=minicloud.local,share=yanick/project_backup/clean_results'
-        return '/run/user/1000/gvfs/smb-share:server=minicloud.local,share=dcl/saved'
-
-    @staticmethod
-    def fail_path():
-        # return 'fail'
-        return '/run/user/1000/gvfs/smb-share:server=minicloud.local,share=dcl/fail' ## TODOTODO
-
-
-    @staticmethod
-    def save_path(params, uid, debug=False, error=False):
-        # dir = f'{PathMaker.debug_path()}' if debug else 'saved'
-        dir = f'{PathMaker.debug_path()}' if debug else f'{PathMaker.nas_path()}' ##TODOTOOD Save to nas
-        dir = f'{PathMaker.fail_path()}' if error else dir
-        return f'{dir}/{params}/{uid}'
 
     @staticmethod
     def log_files(i):
         assert isinstance(i, int) and i >= 0
         return [PathMaker.client_log_file(i), PathMaker.node_log_file(i)]
-    
 
     @staticmethod
     def node_log_file(i):
@@ -90,15 +71,24 @@ class PathMaker:
         return 'results'
 
     @staticmethod
-    def result_file(faults, nodes, rate, tx_size, mode, instance):
-        return join(
-            PathMaker.results_path(), 
-            f'bench-{mode}-{faults}-{nodes}-{rate}-{tx_size}-{instance}.txt'
-        )
+    def params(faults, nodes, rate, tx_size, mode, instance):
+        return f'bench-{mode}-{faults}-{nodes}-{rate}-{tx_size}-{instance}'
+
+    @staticmethod
+    def result_file(dir, params):
+        return f'{join(dir, params)}.txt'
 
     @staticmethod
     def plots_path():
         return 'plots'
+    
+    @staticmethod
+    def error_path():
+        return 'aborted'
+    
+    @staticmethod
+    def save_file(dir, params, uid):
+        return f'{join(dir, params, uid)}.zip'
 
     @staticmethod
     def agg_file(type, mode, faults, nodes, rate, tx_size, max_latency, cores):
@@ -211,6 +201,24 @@ class Mode(str, AutoName):
 
     def is_vm(self):
         return self in [Mode.movevm, Mode.diemvm]
+
+    @staticmethod
+    def diemvm_delay():
+        return 15_000
+    
+    def tx_size(self, default):
+        if self == Mode.hotstuff:
+            return default
+        elif self == Mode.hotcrypto:
+            return 197
+        elif self == Mode.hotmove:
+            return 286
+        elif self == Mode.movevm:
+            return 1
+        elif self == Mode.diemvm:
+            return 1
+        else:
+            self.__str__()
 
     def print(self):
         if self == Mode.hotstuff:

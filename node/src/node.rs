@@ -97,7 +97,6 @@ impl Node {
             .expect("Our public key is not in the committee")
             .clone();
 
-        // ##TODO Do I need to set the ip?
         address.set_ip("0.0.0.0".parse().unwrap());
         address.set_port(port);
         info!("Listening to requests at {}", address);

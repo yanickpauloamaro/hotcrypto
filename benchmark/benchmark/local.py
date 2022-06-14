@@ -130,9 +130,16 @@ class LocalBench:
                     )
                     self._background_run(cmd, log_file)
 
-            # Wait for the nodes to synchronize
-            Print.info('Waiting for the nodes to synchronize...')
-            sleep(2 * self.node_parameters.timeout_delay / 1000)
+            delay = 0
+            if mode == Mode.diemvm:
+                Print.info('Waiting DiemVM to create accounts...')
+                delay = Mode.diemvm_delay()
+            else:
+                # Wait for the nodes to synchronize
+                Print.info('Waiting for the nodes to synchronize...')
+                delay = self.node_parameters.timeout_delay
+
+            sleep(2 * delay / 1000)
 
             # Wait for all transactions to be processed.
             for _ in progress_bar(range(20), prefix=f'Running benchmark ({self.duration} sec):'):

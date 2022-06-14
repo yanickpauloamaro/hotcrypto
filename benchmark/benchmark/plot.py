@@ -4,7 +4,7 @@ from matplotlib.ticker import StrMethodFormatter
 from glob import glob
 from itertools import cycle
 
-from benchmark.utils import PathMaker
+from benchmark.utils import PathMaker, Mode
 from benchmark.config import PlotParameters
 from benchmark.aggregate import LogAggregator
 
@@ -154,7 +154,7 @@ class Ploter:
 
         # Load the aggregated log files.
         robustness_files, latency_files, tps_files = [], [], []
-        tx_size = params.tx_size
+        tx_size = Mode(mode).tx_size(params.tx_size)
         
         for f in params.faults:
             for n in params.nodes:

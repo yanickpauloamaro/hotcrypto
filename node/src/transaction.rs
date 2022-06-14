@@ -14,7 +14,7 @@ use move_core_types::{
 };
 
 pub type Currency = u64;
-pub const CONST_INITIAL_BALANCE: Currency = 100;
+pub const CONST_INITIAL_BALANCE: Currency = 5_000_000;
 #[cfg(feature = "benchmark")]
 pub const NORMAL_TX_AMOUNT: Currency = 1;
 #[cfg(feature = "benchmark")]

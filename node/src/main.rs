@@ -146,7 +146,6 @@ fn deploy_testbed(nodes: usize, mode: &str) -> Result<Vec<JoinHandle<()>>, Box<d
     .write(committee_file)?;
 
     // Print register file
-    let keys: Vec<_> = (0..nodes).map(|_| Secret::new()).collect();
     let accounts: Vec<_> = keys.iter().map(|secret| Account::new(secret.name)).collect();
     let register_file = "register.json";
     let _ = fs::remove_file(register_file);

@@ -1,4 +1,4 @@
-> **Note to readers:** This repo is part of my Master semester project EPFL. I use code from the [Diem foundation](https://github.com/diem) and from Alberto Sonnino's implementation of [HotStuff](https://github.com/asonnino/hotstuff). This README contains the abstract of my project as well as a modified version of the README from HotStuff.
+> **Note to readers:** This repo is part of my Master semester project at EPFL. I use code from the [Diem foundation](https://github.com/diem) and from Alberto Sonnino's implementation of [HotStuff](https://github.com/asonnino/hotstuff). This README contains the abstract of my project as well as a modified version of the README from HotStuff.
 
 # Towards efficient and safe blockchain
 

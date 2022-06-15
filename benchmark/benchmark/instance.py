@@ -140,21 +140,32 @@ class InstanceManager:
                         'Description': 'Front end to accept clients transactions',
                     }],
                 },
+                {
+                    'IpProtocol': 'tcp',
+                    'FromPort': self.settings.request_port,
+                    'ToPort': self.settings.request_port,
+                    'IpRanges': [{
+                        'CidrIp': '0.0.0.0/0',
+                        'Description': 'Front end to accept clients requests',
+                    }],
+                    'Ipv6Ranges': [{
+                        'CidrIpv6': '::/0',
+                        'Description': 'Front end to accept clients requests',
+                    }],
+                },
             ]
         )
 
-    def _get_ami(self, client):
-        ## NB: Using static AMI. Might need to change that if using multiple regions
-        return 'ami-0c6ebbd55ab05f070'
+    def _get_ami(self, client, default_ami='ami-0c6ebbd55ab05f070'):
 
-        # # The AMI changes with regions.
-        # response = client.describe_images(
-        #     Filters=[{
-        #         'Name': 'description',
-        #         'Values': ['Canonical, Ubuntu, 20.04 LTS, amd64 focal image build on 2020-10-26']
-        #     }]
-        # )
-        # return response['Images'][0]['ImageId']
+        # The AMI changes with regions.
+        response = client.describe_images(
+            Filters=[{
+                'Name': 'description',
+                'Values': ['Canonical, Ubuntu, 20.04 LTS, amd64 focal image build on 2020-10-26']
+            }]
+        )
+        return response['Images'][0]['ImageId']
 
 
     def create_instances(self, nodes):
@@ -173,6 +184,13 @@ class InstanceManager:
         try:
             # Create all instances.
             size = nodes * len(self.clients)
+
+            if size > 100:
+                res = input(f"Are you sure you want to create {size} {self.settings.instance_type} instances? (yes or no)")
+                if res.lower() != 'yes':
+                    print("Canceling instance creation")
+                    return
+
             progress = progress_bar(
                 self.clients.values(), prefix=f'Creating {size} instances ({nodes} nodes per region)'
             )
@@ -245,6 +263,38 @@ class InstanceManager:
             #     )
 
             Print.heading(f'Testbed of {size} instances destroyed')
+        except ClientError as e:
+            raise BenchError('Failed to terminate instances', AWSError(e))
+
+    def reduce_instances(self, per_region = lambda n : n):
+        destroyed = 0
+        try:
+            ids, _ = self._get(['pending', 'running'])
+            size = sum(len(x) for x in ids.values())
+            if size == 0:
+                Print.heading(f'All instances are shut down')
+                return
+
+            # Terminate instances.
+            for region, client in self.clients.items():
+                if ids[region]:
+                    nb = int(per_region(len(ids[region])))
+                    to_terminate = ids[region][:nb]
+                    
+                    client.terminate_instances(InstanceIds=to_terminate)
+                    destroyed += len(to_terminate)
+
+            # Wait for all instances to properly shut down.
+            Print.info('Waiting for all instances to shut down...')
+            self._wait(['shutting-down'])
+            
+            ## NB: No security group was created
+            # for client in self.clients.values():
+            #     client.delete_security_group(
+            #         GroupName=self.settings.testbed
+            #     )
+
+            Print.heading(f'Testbed size was reduced by {destroyed}')
         except ClientError as e:
             raise BenchError('Failed to terminate instances', AWSError(e))
 

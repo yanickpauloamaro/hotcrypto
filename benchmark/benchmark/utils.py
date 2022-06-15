@@ -1,5 +1,8 @@
-from os.path import join
-
+from os.path import join, basename
+from multiprocessing import Pool
+from enum import Enum, auto
+from platform import node
+import tqdm
 
 class BenchError(Exception):
     def __init__(self, message, error):
@@ -23,13 +26,17 @@ class PathMaker:
         return '.committee.json'
 
     @staticmethod
+    def register_file():
+        return '.register.json'
+
+    @staticmethod
     def parameters_file():
         return '.parameters.json'
 
     @staticmethod
-    def key_file(i):
+    def key_file(i, bin='node'):
         assert isinstance(i, int) and i >= 0
-        return f'.node-{i}.json'
+        return f'.{bin}-{i}.json'
 
     @staticmethod
     def db_path(i):
@@ -39,6 +46,15 @@ class PathMaker:
     @staticmethod
     def logs_path():
         return 'logs'
+
+    @staticmethod
+    def debug_path():
+        return 'debug'
+
+    @staticmethod
+    def log_files(i):
+        assert isinstance(i, int) and i >= 0
+        return [PathMaker.client_log_file(i), PathMaker.node_log_file(i)]
 
     @staticmethod
     def node_log_file(i):
@@ -55,21 +71,30 @@ class PathMaker:
         return 'results'
 
     @staticmethod
-    def result_file(faults, nodes, rate, tx_size):
-        return join(
-            PathMaker.results_path(), 
-            f'bench-{faults}-{nodes}-{rate}-{tx_size}.txt'
-        )
+    def params(faults, nodes, rate, tx_size, mode, instance):
+        return f'bench-{mode}-{faults}-{nodes}-{rate}-{tx_size}-{instance}'
+
+    @staticmethod
+    def result_file(dir, params):
+        return f'{join(dir, params)}.txt'
 
     @staticmethod
     def plots_path():
         return 'plots'
+    
+    @staticmethod
+    def error_path():
+        return 'aborted'
+    
+    @staticmethod
+    def save_file(dir, params, uid):
+        return f'{join(dir, params, uid)}.zip'
 
     @staticmethod
-    def agg_file(type, faults, nodes, rate, tx_size, max_latency):
+    def agg_file(type, mode, faults, nodes, rate, tx_size, max_latency, cores):
         return join(
             PathMaker.plots_path(),
-            f'{type}-{faults}-{nodes}-{rate}-{tx_size}-{max_latency}.txt'
+            f'{mode}-{type}-{faults}-{nodes}-{rate}-{tx_size}-{max_latency}-{cores}.txt'
         )
 
     @staticmethod
@@ -132,3 +157,79 @@ def progress_bar(iterable, prefix='', suffix='', decimals=1, length=30, fill='â–
         yield item
         printProgressBar(i + 1)
     print()
+
+
+def in_parallel(fn, args, desc, err_msg):
+    try:
+        with Pool() as p:
+            for _ in tqdm.tqdm(
+                p.imap(fn, args),
+                desc=desc,
+                bar_format='{l_bar}{bar:20}{r_bar}{bar:-10b}',
+                total=len(args)):
+                pass
+    except (ValueError, IndexError) as e:
+        raise BenchError(f'{err_msg}: {e}')
+
+class AutoName(Enum):
+    def _generate_next_value_(name, start, count, last_values):
+        return name
+
+class Mode(str, AutoName):
+    hotstuff = auto()
+    hotcrypto = auto()
+    hotmove = auto()
+    movevm = auto()
+    diemvm = auto()
+    
+    def __str__(self):
+        return self.name
+    
+    @staticmethod
+    def default():
+        return Mode.hotstuff
+
+    @staticmethod
+    def possible_values():
+        return [m for m in list(Mode)]
+
+    def has_consensus(self):
+        return self in [Mode.hotstuff, Mode.hotcrypto, Mode.hotmove]
+
+    def has_currency(self):
+        return self in [Mode.hotcrypto, Mode.hotmove]
+
+    def is_vm(self):
+        return self in [Mode.movevm, Mode.diemvm]
+
+    @staticmethod
+    def diemvm_delay():
+        return 15_000
+    
+    def tx_size(self, default):
+        if self == Mode.hotstuff:
+            return default
+        elif self == Mode.hotcrypto:
+            return 197
+        elif self == Mode.hotmove:
+            return 286
+        elif self == Mode.movevm:
+            return 1
+        elif self == Mode.diemvm:
+            return 1
+        else:
+            self.__str__()
+
+    def print(self):
+        if self == Mode.hotstuff:
+            return 'HotStuff'
+        elif self == Mode.hotcrypto:
+            return 'HotCrypto'
+        elif self == Mode.hotmove:
+            return 'HotMove'
+        elif self == Mode.movevm:
+            return 'MoveVM'
+        elif self == Mode.diemvm:
+            return 'DiemVM'
+        else:
+            self.__str__()

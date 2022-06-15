@@ -19,11 +19,38 @@ serde_json = "1.0.61"
 rand = "0.7.3"
 thiserror = "1.0.21"
 anyhow = "1.0.38"
+async-trait = "0.1.50"
+ed25519-dalek = "1.0.1"
+rayon = "1.5.1"
+num_cpus = "1.13.1"
 
 crypto = { path = "../crypto" }
 store = { path = "../store" }
 consensus = { path = "../consensus" }
 mempool = { path = "../mempool" }
+network = { path = "../network" }
+
+## Move benchmark dependencies
+move-core-types = { path = "../move-main/language/move-core/types" }
+move-vm-runtime = { path = "../move-main/language/move-vm/runtime" }
+move-vm-types = { path = "../move-main/language/move-vm/types" }
+move-vm-test-utils = { path = "../move-main/language/move-vm/test-utils" }
+move-stdlib = { path = "../move-main/language/move-stdlib" }
+move-compiler = { path = "../move-main/language/move-compiler" }
+move-binary-format = { package = "move-binary-format", path = "../move-main/language/move-binary-format" }
+move-ir-compiler = { path = "../move-main/language/move-ir-compiler" }
+move-bytecode-verifier = { path = "../move-main/language/move-bytecode-verifier" }
+
+## Diem benchmark dependencies
+diem-types = { path = "../diem-main/types", features = ["fuzzing"] }
+language-e2e-tests = { path = "../diem-main/diem-move/e2e-tests" }
+diem-framework-releases = { path = "../diem-main/diem-move/diem-framework/DPN/releases" }
+diem-framework = { path = "../diem-main/diem-move/diem-framework" }
+move-binary-format-01 = { package = "move-binary-format", git = "https://github.com/diem/move", rev = "98ed299a7e3a9223019c9bdf4dd92fea9faef860" }
+move-bytecode-verifier-01 = { package = "move-bytecode-verifier", git = "https://github.com/diem/move", rev = "98ed299a7e3a9223019c9bdf4dd92fea9faef860" }
+move-ir-compiler-01 = { package = "move-ir-compiler", git = "https://github.com/diem/move", rev = "98ed299a7e3a9223019c9bdf4dd92fea9faef860" }
+move-compiler-01 = { package = "move-compiler", git = "https://github.com/diem/move", rev = "98ed299a7e3a9223019c9bdf4dd92fea9faef860" }
+move-core-types-01 = { package = "move-core-types", git = "https://github.com/diem/move", rev = "98ed299a7e3a9223019c9bdf4dd92fea9faef860" }
 
 [features]
 benchmark = ["consensus/benchmark", "mempool/benchmark"]

@@ -1,3 +1,8 @@
+use crate::transaction::Account;
+use crate::utils::Argument;
+
+use anyhow::{Context, Result};
+use clap::ArgMatches;
 use consensus::{Committee as ConsensusCommittee, Parameters as ConsensusParameters};
 use crypto::{generate_keypair, generate_production_keypair, PublicKey, SecretKey};
 use mempool::{Committee as MempoolCommittee, Parameters as MempoolParameters};
@@ -47,6 +52,7 @@ pub trait Export: Serialize + DeserializeOwned {
     }
 }
 
+// ------------------------------------------------------------------------
 #[derive(Serialize, Deserialize, Default)]
 pub struct Parameters {
     pub consensus: ConsensusParameters,
@@ -55,6 +61,7 @@ pub struct Parameters {
 
 impl Export for Parameters {}
 
+// ------------------------------------------------------------------------
 #[derive(Serialize, Deserialize)]
 pub struct Secret {
     pub name: PublicKey,
@@ -78,6 +85,21 @@ impl Default for Secret {
     }
 }
 
+impl Argument for Secret {
+    type Output = Self;
+
+    const USAGE: &'static str = "
+        --keys=<FILE> 'The file containing this client's keys'
+    ";
+
+    fn from_matches(matches: &ArgMatches<'_>) -> Result<Self::Output> {
+        let key_file = matches.value_of("keys").unwrap();
+        
+        Secret::read(key_file)
+            .context("Unable to read key file")
+    }
+}
+// ------------------------------------------------------------------------
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Committee {
     pub consensus: ConsensusCommittee,
@@ -85,3 +107,55 @@ pub struct Committee {
 }
 
 impl Export for Committee {}
+
+// ------------------------------------------------------------------------
+#[derive(Clone, Serialize, Deserialize)]
+pub struct Register {
+    pub accounts: Vec<Account>
+}
+
+impl Export for Register {
+    fn read(path: &str) -> Result<Self, ConfigError> {
+        let reader = || -> Result<Self, std::io::Error> {
+            let data = fs::read(path)?;
+            let keys: Vec<PublicKey> = serde_json::from_slice(data.as_slice())?;
+            let accounts = keys.iter().map(|key| Account::new(key.clone())).collect();
+            Ok(Self { accounts })
+        };
+        reader().map_err(|e| ConfigError::ReadError {
+            file: path.to_string(),
+            message: e.to_string(),
+        })
+    }
+
+    fn write(&self, path: &str) -> Result<(), ConfigError> {
+        let writer = || -> Result<(), std::io::Error> {
+            let file = OpenOptions::new().create(true).write(true).open(path)?;
+            let mut writer = BufWriter::new(file);
+            let to_write: Vec<_> = self.accounts.iter().map(|account| account.public_key).collect();
+            let data = serde_json::to_string_pretty(&to_write).unwrap();
+            writer.write_all(data.as_ref())?;
+            writer.write_all(b"\n")?;
+            Ok(())
+        };
+        writer().map_err(|e| ConfigError::WriteError {
+            file: path.to_string(),
+            message: e.to_string(),
+        })
+    }
+}
+
+impl Argument for Register {
+    type Output = Self;
+
+    const USAGE: &'static str = "
+        --accounts=[FILE] 'The file containing accounts addresses'
+    ";
+
+    fn from_matches(matches: &ArgMatches<'_>) -> Result<Self::Output> {
+        let register_file = matches.value_of("accounts").unwrap();
+        
+        Register::read(register_file)
+            .context("Unable to read register file")
+    }
+}

@@ -19,7 +19,7 @@ class Key:
 
 
 class Committee:
-    def __init__(self, names, consensus_addr, transactions_addr, mempool_addr):
+    def __init__(self, names, consensus_addr, transactions_addr, mempool_addr, request_ports):
         inputs = [names, consensus_addr, transactions_addr, mempool_addr]
         assert all(isinstance(x, list) for x in inputs)
         assert all(isinstance(x, str) for y in inputs for x in y)
@@ -29,10 +29,12 @@ class Committee:
         self.consensus = consensus_addr
         self.front = transactions_addr
         self.mempool = mempool_addr
+        self.request_ports = request_ports
 
         self.json = {
             'consensus': self._build_consensus(),
-            'mempool': self._build_mempool()
+            'mempool': self._build_mempool(),
+            'request_ports': request_ports
         }
 
     def _build_consensus(self):
@@ -45,9 +47,9 @@ class Committee:
         node = {}
         for n, f, m in zip(self.names, self.front, self.mempool):
             node[n] = {
-                'name': n, 
+                'name': n,
                 'stake': 1,
-                'transactions_address': f, 
+                'transactions_address': f,
                 'mempool_address': m
             }
         return {'authorities': node, 'epoch': 1}
@@ -75,7 +77,8 @@ class Committee:
             x['transactions_address'] for x in mempool_authorities
         ]
         mempool_addr = [x['mempool_address'] for x in mempool_authorities]
-        return cls(names, consensus_addr, transactions_addr, mempool_addr)
+        requests_ports = data['request_ports']
+        return cls(names, consensus_addr, transactions_addr, mempool_addr, requests_ports)
 
 
 class LocalCommittee(Committee):
@@ -87,8 +90,19 @@ class LocalCommittee(Committee):
         consensus = [f'127.0.0.1:{port + i}' for i in range(size)]
         front = [f'127.0.0.1:{port + i + size}' for i in range(size)]
         mempool = [f'127.0.0.1:{port + i + 2*size}' for i in range(size)]
-        super().__init__(names, consensus, front, mempool)
+        request_ports = [f'{port + i + 3*size}' for i in range(size)]
+        super().__init__(names, consensus, front, mempool, request_ports)
 
+class Register:    ##
+    def __init__(self, names):
+        assert isinstance(names, list) and all(
+            isinstance(x, str) for x in names)
+        self.json = names
+
+    def print(self, filename):
+        assert isinstance(filename, str)
+        with open(filename, 'w') as f:
+            dump(self.json, f, indent=4, sort_keys=True)
 
 class NodeParameters:
     def __init__(self, json):
@@ -153,6 +167,12 @@ class PlotParameters:
             if not nodes:
                 raise ConfigError('Missing number of nodes')
             self.nodes = [int(x) for x in nodes]
+
+            cores = json['cores']
+            cores = cores if isinstance(cores, list) else [cores]
+            if not cores:
+                cores = ['4']
+            self.cores = [int(x) for x in cores]
 
             self.tx_size = int(json['tx_size'])
 

@@ -1,0 +1,25 @@
+{
+    "testbed": "hotcrypto",
+    "key": {
+        "name": "aws",
+        "path": "/absolute/key/path"
+    },
+    "ports": {
+        "consensus": 8000,
+        "mempool": 7000,
+        "front": 6000,
+        "request": 9000
+    },
+    "repo": {
+        "name": "hotcrypto",
+        "url": "https://github.com/yanickpauloamaro/hotcrypto.git",
+        "branch": "main"
+    },
+    "instances": {
+        "type": "c5.xlarge",
+        "regions": ["eu-west-3"]
+    },
+    "validity": {
+        "duration": 5
+    }
+}

@@ -1,3 +1,5 @@
+> **Note to readers:** This repo is part of my Master semester project EPFL. I use code from the [Diem foundation](https://github.com/diem) and from Alberto Sonnino's implementation of [HotStuff](https://github.com/asonnino/hotstuff). This README contains the abstract of my project as well as a modified version of the README from HotStuff.
+
 # Towards efficient and safe blockchain
 
 Blockchain is an innovative technology with promising uses in finance, decentralized computing and market platforms. These applications require high performance to be able to reach a truly global scale.
@@ -5,8 +7,6 @@ Blockchain is an innovative technology with promising uses in finance, decentral
 Unfortunately, current blockchains do not reach the tens of thousands of transactions per second necessary for this goal. This project explores bottlenecks in blockchains by building a simple smart-contract system using the same components as Diem, a state of the art blockchain.
 
 We show that consensus is the best performing component of blockchain systems and that cryptography and virtual machines are bottlenecks. We also show that our simplistic system is able to sustain much higher throughput that Diem while using the same components, indicating that the architecture of blockchains have a large impact on performance, independently of the components used.
-
-> **Note to readers:** This repo is part of my Master semester project EPFL. I use code from the [Diem foundation](https://github.com/diem) and from Alberto Sonnino's implementation of [HotStuff](https://github.com/asonnino/hotstuff). The rest of this README is modified version of the one from HotStuff.
 
 This repo provides a minimal implementation of a smart-contract system based on HotStuff consensus and the [Move virtual machine](https://github.com/diem/move). The codebase has been designed to be small, efficient, and easy to benchmark and modify. It has not been designed to run in production but uses real cryptography ([dalek](https://doc.dalek.rs/ed25519_dalek)), networking ([tokio](https://docs.rs/tokio)), and storage ([rocksdb](https://docs.rs/rocksdb)).
 
